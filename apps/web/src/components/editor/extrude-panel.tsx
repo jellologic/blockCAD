@@ -34,6 +34,7 @@ export function ExtrudePanel() {
             type="number"
             value={depth}
             onChange={(e) => updateOperationParams({ depth: Number(e.target.value) })}
+            data-testid="extrude-depth"
             className="w-full rounded border border-[var(--cad-border)] bg-[var(--cad-bg-panel)] px-2 py-1.5 text-xs text-[var(--cad-text-primary)]"
             min={0.1}
             step={0.5}

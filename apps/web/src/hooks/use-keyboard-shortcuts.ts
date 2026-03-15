@@ -17,6 +17,10 @@ export function useKeyboardShortcuts() {
   const setMode = useEditorStore((s) => s.setMode);
   const mode = useEditorStore((s) => s.mode);
   const rebuild = useEditorStore((s) => s.rebuild);
+  const enterSketchMode = useEditorStore((s) => s.enterSketchMode);
+  const exitSketchMode = useEditorStore((s) => s.exitSketchMode);
+  const setSketchTool = useEditorStore((s) => s.setSketchTool);
+  const sketchSession = useEditorStore((s) => s.sketchSession);
 
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
@@ -26,26 +30,85 @@ export function useKeyboardShortcuts() {
 
       switch (e.key) {
         case "Escape":
-          if (activeOperation) {
+          if (mode === "sketch") {
+            if (sketchSession?.activeTool) {
+              setSketchTool(null);
+            } else {
+              exitSketchMode(false);
+            }
+            e.preventDefault();
+          } else if (activeOperation) {
             cancelOperation();
+            e.preventDefault();
           } else {
             selectFeature(null);
             selectFace(null);
             if (mode !== "view") setMode("view");
+            e.preventDefault();
           }
-          e.preventDefault();
           break;
 
         case "Enter":
-          if (activeOperation) {
+          if (mode === "sketch") {
+            exitSketchMode(true);
+            e.preventDefault();
+          } else if (activeOperation) {
             confirmOperation();
+            e.preventDefault();
+          }
+          break;
+
+        case "s":
+        case "S":
+          if (mode !== "sketch" && !activeOperation && !e.ctrlKey && !e.metaKey) {
+            enterSketchMode("front");
+            e.preventDefault();
+          }
+          break;
+
+        case "l":
+        case "L":
+          if (mode === "sketch" && !e.ctrlKey && !e.metaKey) {
+            setSketchTool("line");
+            e.preventDefault();
+          }
+          break;
+
+        case "r":
+        case "R":
+          if (mode === "sketch" && !e.ctrlKey && !e.metaKey) {
+            setSketchTool("rectangle");
+            e.preventDefault();
+          }
+          break;
+
+        case "c":
+        case "C":
+          if (mode === "sketch" && !e.ctrlKey && !e.metaKey) {
+            setSketchTool("circle");
+            e.preventDefault();
+          }
+          break;
+
+        case "a":
+        case "A":
+          if (mode === "sketch" && !e.ctrlKey && !e.metaKey) {
+            setSketchTool("arc");
+            e.preventDefault();
+          }
+          break;
+
+        case "d":
+        case "D":
+          if (mode === "sketch" && !e.ctrlKey && !e.metaKey) {
+            setSketchTool("dimension");
             e.preventDefault();
           }
           break;
 
         case "e":
         case "E":
-          if (!activeOperation && !e.ctrlKey && !e.metaKey) {
+          if (!activeOperation && mode !== "sketch" && !e.ctrlKey && !e.metaKey) {
             startOperation("extrude");
             e.preventDefault();
           }
@@ -53,7 +116,7 @@ export function useKeyboardShortcuts() {
 
         case "w":
         case "W":
-          if (!activeOperation && !e.ctrlKey && !e.metaKey) {
+          if (!activeOperation && mode !== "sketch" && !e.ctrlKey && !e.metaKey) {
             toggleWireframe();
             e.preventDefault();
           }
@@ -61,7 +124,7 @@ export function useKeyboardShortcuts() {
 
         case "f":
         case "F":
-          if (!activeOperation && !e.ctrlKey && !e.metaKey) {
+          if (!activeOperation && mode !== "sketch" && !e.ctrlKey && !e.metaKey) {
             setMode(mode === "select-face" ? "view" : "select-face");
             e.preventDefault();
           }
@@ -85,11 +148,15 @@ export function useKeyboardShortcuts() {
     activeOperation,
     cancelOperation,
     confirmOperation,
+    enterSketchMode,
+    exitSketchMode,
     mode,
     rebuild,
     selectFace,
     selectFeature,
     setMode,
+    setSketchTool,
+    sketchSession,
     startOperation,
     toggleEdges,
     toggleWireframe,

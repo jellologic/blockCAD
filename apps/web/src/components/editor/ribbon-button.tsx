@@ -7,6 +7,7 @@ interface RibbonButtonProps {
   size?: "large" | "small";
   active?: boolean;
   disabled?: boolean;
+  testId?: string;
   onClick: () => void;
 }
 
@@ -17,6 +18,7 @@ export function RibbonButton({
   size = "large",
   active = false,
   disabled = false,
+  testId,
   onClick,
 }: RibbonButtonProps) {
   const title = shortcut ? `${label} (${shortcut})` : label;
@@ -27,6 +29,7 @@ export function RibbonButton({
         onClick={onClick}
         disabled={disabled}
         title={title}
+        data-testid={testId}
         className={`flex items-center gap-1.5 rounded px-2 py-1 text-xs transition-colors ${
           active
             ? "bg-[var(--cad-accent)]/20 text-[var(--cad-accent)]"
@@ -46,6 +49,7 @@ export function RibbonButton({
       onClick={onClick}
       disabled={disabled}
       title={title}
+      data-testid={testId}
       className={`flex flex-col items-center gap-1 rounded px-3 py-1.5 transition-colors ${
         active
           ? "bg-[var(--cad-accent)]/20 text-[var(--cad-accent)]"

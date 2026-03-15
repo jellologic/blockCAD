@@ -17,11 +17,11 @@ export function StatusBar() {
 
   return (
     <div className="flex items-center justify-between bg-[var(--cad-bg-panel)] border-t border-[var(--cad-border)] px-3 text-[10px] text-[var(--cad-text-muted)]">
-      <span>{statusText}</span>
+      <span data-testid="status-text">{statusText}</span>
       <div className="flex items-center gap-3">
         {meshData && meshData.vertexCount > 0 && (
           <>
-            <span>Verts: {meshData.vertexCount}</span>
+            <span data-testid="vertex-count">Verts: {meshData.vertexCount}</span>
             <span>Tris: {meshData.triangleCount}</span>
           </>
         )}

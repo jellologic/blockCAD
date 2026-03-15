@@ -87,6 +87,7 @@ export function FeatureTree() {
           return (
             <button
               key={feature.id}
+              data-testid={`feature-${feature.id}`}
               onClick={() => selectFeature(feature.id)}
               onContextMenu={(e) => handleContextMenu(e, feature.id, index)}
               className={`flex w-full items-center gap-2 px-3 py-1 text-xs transition-colors ${
@@ -112,7 +113,7 @@ export function FeatureTree() {
 
       {/* Footer */}
       <div className="border-t border-[var(--cad-border)] px-3 py-1.5">
-        <span className="text-[10px] text-[var(--cad-text-muted)]">
+        <span className="text-[10px] text-[var(--cad-text-muted)]" data-testid="feature-count">
           {features.length} feature{features.length !== 1 ? "s" : ""}
         </span>
       </div>

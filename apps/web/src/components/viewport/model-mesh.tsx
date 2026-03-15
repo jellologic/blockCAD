@@ -155,6 +155,8 @@ export function ModelMesh({ meshData, wireframe = false }: ModelMeshProps) {
           roughness={0.6}
           wireframe={wireframe}
           side={THREE.DoubleSide}
+          transparent={mode === "sketch"}
+          opacity={mode === "sketch" ? 0.2 : 1}
         />
       </mesh>
 

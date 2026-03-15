@@ -19,6 +19,7 @@ export function PropertyManager() {
         <div className="flex items-center gap-1">
           <button
             onClick={confirmOperation}
+            data-testid="operation-confirm"
             className="rounded p-1 transition-colors hover:bg-[var(--cad-confirm)]/20"
             title="Confirm (Enter)"
           >
@@ -26,6 +27,7 @@ export function PropertyManager() {
           </button>
           <button
             onClick={cancelOperation}
+            data-testid="operation-cancel"
             className="rounded p-1 transition-colors hover:bg-[var(--cad-cancel)]/20"
             title="Cancel (Escape)"
           >
