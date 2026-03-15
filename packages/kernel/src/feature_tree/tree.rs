@@ -1,4 +1,8 @@
+use std::collections::HashMap;
+
 use crate::error::{KernelError, KernelResult};
+use crate::operations::extrude::ExtrudeProfile;
+use crate::sketch::Sketch;
 use crate::topology::BRep;
 
 use super::feature::{Feature, FeatureState};
@@ -15,6 +19,11 @@ pub struct FeatureTree {
     cursor: Option<usize>,
     /// Cached BRep at each feature step. None = needs re-evaluation.
     cache: Vec<Option<BRep>>,
+    /// Sketch data associated with Sketch features, keyed by feature index.
+    /// Stored separately because Sketch is not serializable through FeatureParams.
+    pub sketches: HashMap<usize, Sketch>,
+    /// Intermediate results: solved profiles from sketch features, keyed by feature index.
+    pub sketch_profiles: HashMap<usize, ExtrudeProfile>,
 }
 
 impl FeatureTree {
@@ -23,6 +32,8 @@ impl FeatureTree {
             features: Vec::new(),
             cursor: None,
             cache: Vec::new(),
+            sketches: HashMap::new(),
+            sketch_profiles: HashMap::new(),
         }
     }
 
@@ -115,6 +126,20 @@ impl FeatureTree {
 
     pub fn features(&self) -> &[Feature] {
         &self.features
+    }
+
+    pub fn features_mut(&mut self) -> &mut Vec<Feature> {
+        &mut self.features
+    }
+
+    pub fn cache_at(&self, index: usize) -> Option<&BRep> {
+        self.cache.get(index).and_then(|c| c.as_ref())
+    }
+
+    pub fn set_cache(&mut self, index: usize, brep: BRep) {
+        if index < self.cache.len() {
+            self.cache[index] = Some(brep);
+        }
     }
 
     pub fn invalidate_from(&mut self, index: usize) {

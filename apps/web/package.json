@@ -5,13 +5,18 @@
   "scripts": {
     "build": "vite build",
     "serve": "vite preview",
-    "dev": "vite dev"
+    "dev": "vite dev",
+    "test": "vitest run"
   },
   "dependencies": {
     "@blockCAD/api": "workspace:*",
     "@blockCAD/auth": "workspace:*",
     "@blockCAD/env": "workspace:*",
+    "@blockCAD/kernel": "workspace:*",
     "@blockCAD/ui": "workspace:*",
+    "@react-three/drei": "^10.0.0",
+    "@react-three/fiber": "^9.1.0",
+    "three": "^0.175.0",
     "@orpc/client": "catalog:",
     "@orpc/openapi": "catalog:",
     "@orpc/server": "catalog:",
@@ -43,10 +48,12 @@
     "@testing-library/react": "^16.2.0",
     "@types/react": "catalog:",
     "@types/react-dom": "catalog:",
+    "@types/three": "^0.175.0",
     "@vitejs/plugin-react": "^5.0.4",
     "jsdom": "^26.0.0",
     "typescript": "^5",
     "vite": "^7.0.2",
+    "vitest": "^3.2.1",
     "web-vitals": "^5.0.3"
   }
 }

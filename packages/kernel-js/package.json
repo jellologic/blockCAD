@@ -5,17 +5,22 @@
   "exports": {
     ".": {
       "default": "./src/index.ts"
+    },
+    "./mock": {
+      "default": "./src/mock-kernel.ts"
     }
   },
   "scripts": {
     "build": "tsc --build",
-    "check-types": "tsc --noEmit"
+    "check-types": "tsc --noEmit",
+    "test": "vitest run"
   },
   "dependencies": {
     "@blockCAD/kernel-wasm": "workspace:*"
   },
   "devDependencies": {
     "@blockCAD/config": "workspace:*",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^3.2.1"
   }
 }

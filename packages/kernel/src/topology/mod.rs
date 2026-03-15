@@ -1,5 +1,6 @@
 pub mod body;
 pub mod brep;
+pub mod builders;
 pub mod coedge;
 pub mod edge;
 pub mod entity;
