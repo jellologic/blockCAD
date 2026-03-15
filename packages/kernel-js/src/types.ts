@@ -50,8 +50,66 @@ export interface ChamferParams {
   distance2?: number;
 }
 
+// --- Sketch 2D types ---
+
+export interface SketchPoint2D {
+  x: number;
+  y: number;
+}
+
+export type SketchPlaneId = "front" | "top" | "right";
+
+export interface SketchPlane {
+  origin: Vec3;
+  normal: Vec3;
+  uAxis: Vec3;
+  vAxis: Vec3;
+}
+
+export type SketchEntity2D =
+  | { type: "point"; id: string; position: SketchPoint2D }
+  | { type: "line"; id: string; startId: string; endId: string }
+  | { type: "circle"; id: string; centerId: string; radius: number }
+  | { type: "arc"; id: string; centerId: string; startId: string; endId: string; radius: number };
+
+export interface SketchConstraint2D {
+  id: string;
+  kind: string;
+  entityIds: string[];
+  value?: number;
+}
+
+export interface SketchFeatureData {
+  plane: SketchPlane;
+  entities: SketchEntity2D[];
+  constraints: SketchConstraint2D[];
+}
+
+/** Standard reference planes */
+export const FRONT_PLANE: SketchPlane = {
+  origin: [0, 0, 0],
+  normal: [0, 0, 1],
+  uAxis: [1, 0, 0],
+  vAxis: [0, 1, 0],
+};
+
+export const TOP_PLANE: SketchPlane = {
+  origin: [0, 0, 0],
+  normal: [0, 1, 0],
+  uAxis: [1, 0, 0],
+  vAxis: [0, 0, 1],
+};
+
+export const RIGHT_PLANE: SketchPlane = {
+  origin: [0, 0, 0],
+  normal: [1, 0, 0],
+  uAxis: [0, 1, 0],
+  vAxis: [0, 0, 1],
+};
+
 export type FeatureParams =
   | { type: "placeholder" }
+  | { type: "sketch"; params: SketchFeatureData }
   | { type: "extrude"; params: ExtrudeParams }
   | { type: "revolve"; params: RevolveParams }
   | { type: "fillet"; params: FilletParams }

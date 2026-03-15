@@ -5,9 +5,6 @@
   "exports": {
     ".": {
       "default": "./src/index.ts"
-    },
-    "./mock": {
-      "default": "./src/mock-kernel.ts"
     }
   },
   "scripts": {
