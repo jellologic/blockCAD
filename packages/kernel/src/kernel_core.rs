@@ -95,6 +95,16 @@ impl KernelCore {
             .map_err(|e| KernelError::Serialization(e.to_string()))
     }
 
+    /// Suppress a feature by index.
+    pub fn suppress(&mut self, index: usize) -> KernelResult<()> {
+        self.tree.suppress(index)
+    }
+
+    /// Unsuppress a feature by index.
+    pub fn unsuppress(&mut self, index: usize) -> KernelResult<()> {
+        self.tree.unsuppress(index)
+    }
+
     /// Deserialize from .blockcad JSON format.
     pub fn deserialize(json: &str) -> KernelResult<Self> {
         let doc = KernelDocument::from_json(json)

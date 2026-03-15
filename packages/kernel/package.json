@@ -2,9 +2,17 @@
   "name": "@blockCAD/kernel-wasm",
   "private": true,
   "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./pkg/blockcad_kernel.d.ts",
+      "default": "./pkg/blockcad_kernel.js"
+    },
+    "./pkg/*": "./pkg/*"
+  },
   "scripts": {
-    "build": "wasm-pack build --target web --out-dir pkg --features wasm,client",
-    "build:server": "wasm-pack build --target nodejs --out-dir pkg-server --features wasm,server",
+    "build": "wasm-pack build --target web --out-dir pkg --features wasm --no-default-features",
+    "build:server": "wasm-pack build --target nodejs --out-dir pkg-server --features wasm,server --no-default-features",
     "test:rust": "cargo test --features server",
     "test:client": "cargo test --features client",
     "lint": "cargo clippy --features server -- -D warnings",
