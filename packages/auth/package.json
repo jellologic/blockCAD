@@ -1,0 +1,24 @@
+{
+  "name": "@blockCAD/auth",
+  "type": "module",
+  "exports": {
+    ".": {
+      "default": "./src/index.ts"
+    },
+    "./*": {
+      "default": "./src/*.ts"
+    }
+  },
+  "scripts": {},
+  "dependencies": {
+    "@blockCAD/db": "workspace:*",
+    "@blockCAD/env": "workspace:*",
+    "better-auth": "catalog:",
+    "dotenv": "catalog:",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@blockCAD/config": "workspace:*",
+    "typescript": "^5"
+  }
+}

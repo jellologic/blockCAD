@@ -1,0 +1,3 @@
+{
+  "extends": "@blockCAD/config/tsconfig.base.json"
+}
