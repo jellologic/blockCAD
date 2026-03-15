@@ -170,10 +170,18 @@ pub fn build_constraint_graph(sketch: &Sketch) -> KernelResult<(ConstraintGraph,
                     SketchEntity::Line { start: s2, end: e2 },
                 ) = (line1, line2)
                 {
-                    let (x1, y1) = var_map.point_vars(*s1).unwrap();
-                    let (x2, y2) = var_map.point_vars(*e1).unwrap();
-                    let (x3, y3) = var_map.point_vars(*s2).unwrap();
-                    let (x4, y4) = var_map.point_vars(*e2).unwrap();
+                    let (x1, y1) = var_map.point_vars(*s1).ok_or_else(|| {
+                        KernelError::Internal("Parallel: line1 start not a point".into())
+                    })?;
+                    let (x2, y2) = var_map.point_vars(*e1).ok_or_else(|| {
+                        KernelError::Internal("Parallel: line1 end not a point".into())
+                    })?;
+                    let (x3, y3) = var_map.point_vars(*s2).ok_or_else(|| {
+                        KernelError::Internal("Parallel: line2 start not a point".into())
+                    })?;
+                    let (x4, y4) = var_map.point_vars(*e2).ok_or_else(|| {
+                        KernelError::Internal("Parallel: line2 end not a point".into())
+                    })?;
                     graph.add_equation(Box::new(ParallelEquation::new(
                         x1, y1, x2, y2, x3, y3, x4, y4,
                     )));
@@ -190,10 +198,18 @@ pub fn build_constraint_graph(sketch: &Sketch) -> KernelResult<(ConstraintGraph,
                     SketchEntity::Line { start: s2, end: e2 },
                 ) = (line1, line2)
                 {
-                    let (ax, ay) = var_map.point_vars(*s1).unwrap();
-                    let (bx, by) = var_map.point_vars(*e1).unwrap();
-                    let (cx, cy) = var_map.point_vars(*s2).unwrap();
-                    let (dx, dy) = var_map.point_vars(*e2).unwrap();
+                    let (ax, ay) = var_map.point_vars(*s1).ok_or_else(|| {
+                        KernelError::Internal("Collinear: line1 start not a point".into())
+                    })?;
+                    let (bx, by) = var_map.point_vars(*e1).ok_or_else(|| {
+                        KernelError::Internal("Collinear: line1 end not a point".into())
+                    })?;
+                    let (cx, cy) = var_map.point_vars(*s2).ok_or_else(|| {
+                        KernelError::Internal("Collinear: line2 start not a point".into())
+                    })?;
+                    let (dx, dy) = var_map.point_vars(*e2).ok_or_else(|| {
+                        KernelError::Internal("Collinear: line2 end not a point".into())
+                    })?;
                     graph.add_equation(Box::new(CollinearEquation::new(ax, ay, bx, by, cx, cy)));
                     graph.add_equation(Box::new(CollinearEquation::new(ax, ay, bx, by, dx, dy)));
                 }
@@ -208,10 +224,18 @@ pub fn build_constraint_graph(sketch: &Sketch) -> KernelResult<(ConstraintGraph,
                     SketchEntity::Line { start: s2, end: e2 },
                 ) = (line1, line2)
                 {
-                    let (x1, y1) = var_map.point_vars(*s1).unwrap();
-                    let (x2, y2) = var_map.point_vars(*e1).unwrap();
-                    let (x3, y3) = var_map.point_vars(*s2).unwrap();
-                    let (x4, y4) = var_map.point_vars(*e2).unwrap();
+                    let (x1, y1) = var_map.point_vars(*s1).ok_or_else(|| {
+                        KernelError::Internal("Angle: line1 start not a point".into())
+                    })?;
+                    let (x2, y2) = var_map.point_vars(*e1).ok_or_else(|| {
+                        KernelError::Internal("Angle: line1 end not a point".into())
+                    })?;
+                    let (x3, y3) = var_map.point_vars(*s2).ok_or_else(|| {
+                        KernelError::Internal("Angle: line2 start not a point".into())
+                    })?;
+                    let (x4, y4) = var_map.point_vars(*e2).ok_or_else(|| {
+                        KernelError::Internal("Angle: line2 end not a point".into())
+                    })?;
                     graph.add_equation(Box::new(AngleEquation::new(
                         x1, y1, x2, y2, x3, y3, x4, y4, *value,
                     )));
@@ -243,8 +267,12 @@ pub fn build_constraint_graph(sketch: &Sketch) -> KernelResult<(ConstraintGraph,
                 })?;
                 let axis_line = sketch.entities.get(*axis)?;
                 if let SketchEntity::Line { start, end } = axis_line {
-                    let (ax, ay) = var_map.point_vars(*start).unwrap();
-                    let (bx, by) = var_map.point_vars(*end).unwrap();
+                    let (ax, ay) = var_map.point_vars(*start).ok_or_else(|| {
+                        KernelError::Internal("Symmetric: axis start not a point".into())
+                    })?;
+                    let (bx, by) = var_map.point_vars(*end).ok_or_else(|| {
+                        KernelError::Internal("Symmetric: axis end not a point".into())
+                    })?;
                     graph.add_equation(Box::new(SymmetricMidpointEquation::new(
                         p1x, p1y, p2x, p2y, ax, ay, bx, by,
                     )));
@@ -279,10 +307,18 @@ pub fn build_constraint_graph(sketch: &Sketch) -> KernelResult<(ConstraintGraph,
                         SketchEntity::Line { start: s1, end: e1 },
                         SketchEntity::Line { start: s2, end: e2 },
                     ) => {
-                        let (x1, y1) = var_map.point_vars(*s1).unwrap();
-                        let (x2, y2) = var_map.point_vars(*e1).unwrap();
-                        let (x3, y3) = var_map.point_vars(*s2).unwrap();
-                        let (x4, y4) = var_map.point_vars(*e2).unwrap();
+                        let (x1, y1) = var_map.point_vars(*s1).ok_or_else(|| {
+                            KernelError::Internal("Equal: line1 start not a point".into())
+                        })?;
+                        let (x2, y2) = var_map.point_vars(*e1).ok_or_else(|| {
+                            KernelError::Internal("Equal: line1 end not a point".into())
+                        })?;
+                        let (x3, y3) = var_map.point_vars(*s2).ok_or_else(|| {
+                            KernelError::Internal("Equal: line2 start not a point".into())
+                        })?;
+                        let (x4, y4) = var_map.point_vars(*e2).ok_or_else(|| {
+                            KernelError::Internal("Equal: line2 end not a point".into())
+                        })?;
                         graph.add_equation(Box::new(EqualLengthEquation::new(
                             x1, y1, x2, y2, x3, y3, x4, y4,
                         )));
