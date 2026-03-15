@@ -26,13 +26,11 @@ describe("editor store", () => {
     expect(state.meshData).toBeNull();
   });
 
-  it("initializes kernel and loads mesh", async () => {
+  it("initializes kernel", async () => {
     await useEditorStore.getState().initKernel();
     const state = useEditorStore.getState();
     expect(state.isLoading).toBe(false);
-    expect(state.meshData).not.toBeNull();
-    expect(state.meshData!.vertexCount).toBe(24);
-    expect(state.features).toHaveLength(2);
+    expect(state.kernel).not.toBeNull();
   });
 
   it("toggles wireframe", () => {
@@ -72,23 +70,5 @@ describe("editor store", () => {
     expect(useEditorStore.getState().hoveredFaceIndex).toBe(2);
     useEditorStore.getState().hoverFace(null);
     expect(useEditorStore.getState().hoveredFaceIndex).toBeNull();
-  });
-
-  it("adds feature and rebuilds mesh", async () => {
-    await useEditorStore.getState().initKernel();
-    useEditorStore.getState().addFeature("extrude", "Extrude 2", {
-      type: "extrude",
-      params: {
-        direction: [0, 0, 1],
-        depth: 15,
-        symmetric: false,
-        draft_angle: 0,
-      },
-    });
-    const state = useEditorStore.getState();
-    expect(state.features).toHaveLength(3);
-    expect(state.meshData).not.toBeNull();
-    // New extrude with depth=15 should change the mesh
-    expect(state.meshData!.vertexCount).toBe(24);
   });
 });

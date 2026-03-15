@@ -7,6 +7,14 @@ import tsconfigPaths from "vite-tsconfig-paths";
 export default defineConfig({
   plugins: [tsconfigPaths(), tailwindcss(), tanstackStart(), viteReact()],
   server: {
-    port: 3001,
+    port: 5020,
+    fs: {
+      // Allow serving WASM files from the kernel-wasm package
+      allow: ["../.."],
+    },
+  },
+  optimizeDeps: {
+    // Exclude WASM package from pre-bundling (it has side-effects on import)
+    exclude: ["@blockCAD/kernel-wasm"],
   },
 });
