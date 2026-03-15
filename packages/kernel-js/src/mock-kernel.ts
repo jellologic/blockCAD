@@ -1,8 +1,9 @@
 import type { MeshData } from "./mesh";
-import type { FeatureEntry } from "./types";
+import type { FeatureEntry, FeatureParams } from "./types";
+import { generateBoxMesh } from "./mesh-generators";
 
 /**
- * Mock kernel that returns pre-computed mesh data for a 10×5×7 extruded box.
+ * Mock kernel that returns pre-computed mesh data for a 10x5x7 extruded box.
  * Used until the real WASM build pipeline is set up.
  *
  * Box corners:
@@ -76,11 +77,16 @@ const BOX_INDICES = new Uint32Array([
   20, 21, 22,  20, 22, 23,
 ]);
 
+// Face IDs: 2 triangles per face, 6 faces
+// prettier-ignore
+const BOX_FACE_IDS = new Uint32Array([0,0, 1,1, 2,2, 3,3, 4,4, 5,5]);
+
 export const MOCK_BOX_MESH: MeshData = {
   positions: BOX_POSITIONS,
   normals: BOX_NORMALS,
   uvs: BOX_UVS,
   indices: BOX_INDICES,
+  faceIds: BOX_FACE_IDS,
   vertexCount: 24,
   triangleCount: 12,
 };
@@ -110,6 +116,8 @@ export const MOCK_FEATURES: FeatureEntry[] = [
   },
 ];
 
+let nextFeatureId = 3;
+
 export class MockKernelClient {
   private features: FeatureEntry[] = [...MOCK_FEATURES];
 
@@ -118,10 +126,73 @@ export class MockKernelClient {
   }
 
   get featureList(): FeatureEntry[] {
-    return this.features;
+    return [...this.features];
   }
 
+  /**
+   * Add a new feature and return its generated ID.
+   */
+  addFeature(kind: string, name: string, params: FeatureParams): string {
+    const id = `feat-${String(nextFeatureId++).padStart(3, "0")}`;
+    this.features.push({
+      id,
+      name,
+      type: kind as FeatureEntry["type"],
+      suppressed: false,
+      params,
+    });
+    return id;
+  }
+
+  /**
+   * Suppress a feature by index (0-based).
+   */
+  suppressFeature(index: number): void {
+    if (index >= 0 && index < this.features.length) {
+      this.features[index].suppressed = true;
+    }
+  }
+
+  /**
+   * Unsuppress a feature by index (0-based).
+   */
+  unsuppressFeature(index: number): void {
+    if (index >= 0 && index < this.features.length) {
+      this.features[index].suppressed = false;
+    }
+  }
+
+  /**
+   * Tessellate the current feature tree into mesh data.
+   * Finds the last unsuppressed extrude and generates a box from its depth.
+   * Falls back to the default 10x5x7 box if no extrude is found.
+   */
   tessellate(): MeshData {
+    // Find last unsuppressed extrude feature
+    const extrudes = this.features.filter(
+      (f) => f.type === "extrude" && !f.suppressed && f.params.type === "extrude"
+    );
+
+    if (extrudes.length === 0) {
+      // Return empty mesh if no extrudes
+      return {
+        positions: new Float32Array(0),
+        normals: new Float32Array(0),
+        uvs: new Float32Array(0),
+        indices: new Uint32Array(0),
+        faceIds: new Uint32Array(0),
+        vertexCount: 0,
+        triangleCount: 0,
+      };
+    }
+
+    const lastExtrude = extrudes[extrudes.length - 1];
+    if (lastExtrude.params.type === "extrude") {
+      const { depth } = lastExtrude.params.params;
+      // Use default 10x5 base with the extrude depth
+      return generateBoxMesh(10, 5, depth);
+    }
+
     return MOCK_BOX_MESH;
   }
 }

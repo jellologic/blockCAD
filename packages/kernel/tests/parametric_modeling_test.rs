@@ -214,6 +214,29 @@ fn test_triangle_extrusion() {
 }
 
 #[test]
+fn test_serialize_deserialize_roundtrip() {
+    use blockcad_kernel::serialization::{feature_tree_io, schema::KernelDocument};
+
+    let mut tree = build_sketch_extrude_tree(10.0, 5.0, 7.0);
+
+    // Evaluate first to populate sketch profiles
+    let brep1 = evaluate(&mut tree).unwrap();
+    assert_eq!(brep1.faces.len(), 6);
+
+    // Serialize
+    let doc = feature_tree_io::serialize_tree(&tree, "Test").unwrap();
+    let json = doc.to_json_pretty().unwrap();
+
+    // Deserialize into new tree
+    let doc2 = KernelDocument::from_json(&json).unwrap();
+    let mut tree2 = feature_tree_io::deserialize_tree(&doc2).unwrap();
+
+    // Evaluate the deserialized tree - should produce same BRep
+    let brep2 = evaluate(&mut tree2).unwrap();
+    assert_eq!(brep2.faces.len(), 6, "Deserialized tree should produce same BRep");
+}
+
+#[test]
 fn test_sketch_revolve_pipeline() {
     let mut tree = FeatureTree::new();
 

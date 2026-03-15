@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { initMockKernel, MOCK_BOX_MESH, MOCK_FEATURES } from "../mock-kernel";
+import { generateBoxMesh } from "../mesh-generators";
 
 describe("MockKernelClient", () => {
   it("initializes successfully", async () => {
@@ -40,6 +41,55 @@ describe("MockKernelClient", () => {
     expect(mesh.normals).toBeInstanceOf(Float32Array);
     expect(mesh.uvs).toBeInstanceOf(Float32Array);
     expect(mesh.indices).toBeInstanceOf(Uint32Array);
+    expect(mesh.faceIds).toBeInstanceOf(Uint32Array);
+  });
+
+  it("tessellated mesh includes faceIds", async () => {
+    const client = await initMockKernel();
+    const mesh = client.tessellate();
+    expect(mesh.faceIds).toHaveLength(12); // one per triangle
+    // Face 0 = bottom (2 tris), face 1 = top (2 tris), etc.
+    expect(mesh.faceIds[0]).toBe(0);
+    expect(mesh.faceIds[1]).toBe(0);
+    expect(mesh.faceIds[2]).toBe(1);
+    expect(mesh.faceIds[3]).toBe(1);
+  });
+
+  it("addFeature creates a new feature", async () => {
+    const client = await initMockKernel();
+    const id = client.addFeature("extrude", "Extrude 2", {
+      type: "extrude",
+      params: { direction: [0, 0, 1], depth: 15, symmetric: false, draft_angle: 0 },
+    });
+    expect(id).toMatch(/^feat-\d{3}$/);
+    expect(client.featureCount).toBe(3);
+    expect(client.featureList[2].name).toBe("Extrude 2");
+  });
+
+  it("tessellate uses last extrude depth", async () => {
+    const client = await initMockKernel();
+    client.addFeature("extrude", "Extrude 2", {
+      type: "extrude",
+      params: { direction: [0, 0, 1], depth: 20, symmetric: false, draft_angle: 0 },
+    });
+    const mesh = client.tessellate();
+    // With depth=20, the top face z-coords should be 20
+    // Check a top-face vertex (vertex index 4 = first top vertex, z component at positions[14])
+    expect(mesh.positions[14]).toBe(20);
+  });
+
+  it("suppressFeature / unsuppressFeature", async () => {
+    const client = await initMockKernel();
+    client.suppressFeature(1);
+    expect(client.featureList[1].suppressed).toBe(true);
+    // With extrude suppressed, tessellate should return empty mesh
+    const mesh = client.tessellate();
+    expect(mesh.vertexCount).toBe(0);
+
+    client.unsuppressFeature(1);
+    expect(client.featureList[1].suppressed).toBe(false);
+    const mesh2 = client.tessellate();
+    expect(mesh2.vertexCount).toBe(24);
   });
 });
 
@@ -54,6 +104,7 @@ describe("MOCK_BOX_MESH", () => {
     expect(MOCK_BOX_MESH.normals.length).toBe(MOCK_BOX_MESH.vertexCount * 3);
     expect(MOCK_BOX_MESH.uvs.length).toBe(MOCK_BOX_MESH.vertexCount * 2);
     expect(MOCK_BOX_MESH.indices.length).toBe(MOCK_BOX_MESH.triangleCount * 3);
+    expect(MOCK_BOX_MESH.faceIds.length).toBe(MOCK_BOX_MESH.triangleCount);
   });
 
   it("normals are unit vectors", () => {
@@ -76,5 +127,27 @@ describe("MOCK_FEATURES", () => {
       expect(typeof f.suppressed).toBe("boolean");
       expect(f.params).toBeDefined();
     }
+  });
+});
+
+describe("generateBoxMesh", () => {
+  it("generates mesh with correct vertex/triangle counts", () => {
+    const mesh = generateBoxMesh(5, 3, 8);
+    expect(mesh.vertexCount).toBe(24);
+    expect(mesh.triangleCount).toBe(12);
+    expect(mesh.faceIds).toHaveLength(12);
+  });
+
+  it("generates mesh with correct dimensions", () => {
+    const mesh = generateBoxMesh(5, 3, 8);
+    // Check a top-face vertex z-coord should be depth=8
+    // Top face starts at vertex 4, z at positions[4*3+2] = positions[14]
+    expect(mesh.positions[14]).toBe(8);
+  });
+
+  it("has valid face IDs", () => {
+    const mesh = generateBoxMesh(2, 2, 2);
+    const uniqueFaces = new Set(mesh.faceIds);
+    expect(uniqueFaces.size).toBe(6);
   });
 });

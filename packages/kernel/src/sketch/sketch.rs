@@ -7,7 +7,7 @@ use super::entity::{SketchEntity, SketchEntityId};
 /// A 2D parametric sketch on a plane.
 /// Sketches contain entities (points, lines, arcs, etc.) and constraints
 /// that define geometric relationships between them.
-#[derive(Debug)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Sketch {
     pub plane: Plane,
     pub entities: EntityStore<SketchEntity>,

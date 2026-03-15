@@ -13,3 +13,4 @@ export type {
 export { KernelError } from "./errors";
 export type { KernelErrorKind } from "./errors";
 export { initMockKernel, MockKernelClient } from "./mock-kernel";
+export { generateBoxMesh } from "./mesh-generators";

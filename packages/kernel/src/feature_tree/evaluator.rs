@@ -37,14 +37,22 @@ pub fn evaluate(tree: &mut FeatureTree) -> KernelResult<BRep> {
 
         match feature.kind {
             FeatureKind::Sketch => {
-                let sketch = tree.sketches.get(&i).ok_or_else(|| {
-                    KernelError::Operation {
+                // Get sketch: prefer from params, fall back to tree.sketches side-channel
+                let sketch = if let FeatureParams::Sketch(s) = &tree.features()[i].params {
+                    s.clone()
+                } else if let Some(s) = tree.sketches.get(&i) {
+                    s.clone()
+                } else {
+                    tree.features_mut()[i].state = FeatureState::Failed;
+                    return Err(KernelError::Operation {
                         op: "evaluate".into(),
                         detail: format!("No sketch data for feature at index {}", i),
-                    }
-                })?;
+                    });
+                };
+                // Populate the side-channel for profile extraction
+                tree.sketches.insert(i, sketch.clone());
 
-                let (mut graph, var_map) = build_constraint_graph(sketch)?;
+                let (mut graph, var_map) = build_constraint_graph(&sketch)?;
                 let result = solve(&mut graph, &SolverConfig::default())?;
                 if !result.converged {
                     tree.features_mut()[i].state = FeatureState::Failed;
@@ -54,7 +62,7 @@ pub fn evaluate(tree: &mut FeatureTree) -> KernelResult<BRep> {
                     });
                 }
 
-                let profile = extract_profile(sketch, &var_map, &graph)?;
+                let profile = extract_profile(&sketch, &var_map, &graph)?;
                 tree.sketch_profiles.insert(i, profile);
                 tree.features_mut()[i].state = FeatureState::Evaluated;
                 // Sketch doesn't produce geometry — current_brep unchanged

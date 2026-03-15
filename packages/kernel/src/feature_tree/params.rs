@@ -13,6 +13,7 @@ pub enum FeatureParams {
     Placeholder,
 
     // Client operations
+    Sketch(crate::sketch::Sketch),
     Extrude(crate::operations::extrude::ExtrudeParams),
     Revolve(crate::operations::revolve::RevolveParams),
     Fillet(crate::operations::fillet::FilletParams),

@@ -114,6 +114,11 @@ impl TriMesh {
             buf.extend_from_slice(&i.to_le_bytes());
         }
 
+        // Write face IDs (one per triangle)
+        for &id in &self.face_ids {
+            buf.extend_from_slice(&id.to_le_bytes());
+        }
+
         buf
     }
 }

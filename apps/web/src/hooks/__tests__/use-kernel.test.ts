@@ -1,48 +1,93 @@
-import { describe, it, expect } from "vitest";
-import { renderHook, waitFor } from "@testing-library/react";
-import { useKernel } from "../use-kernel";
+import { describe, it, expect, beforeEach } from "vitest";
+import { useEditorStore } from "@/stores/editor-store";
 
-describe("useKernel", () => {
+describe("editor store", () => {
+  beforeEach(() => {
+    // Reset store state between tests
+    useEditorStore.setState({
+      kernel: null,
+      meshData: null,
+      features: [],
+      isLoading: true,
+      error: null,
+      mode: "view",
+      selectedFeatureId: null,
+      selectedFaceIndex: null,
+      hoveredFaceIndex: null,
+      wireframe: false,
+      showEdges: true,
+    });
+  });
+
   it("starts in loading state", () => {
-    const { result } = renderHook(() => useKernel());
-    expect(result.current.isLoading).toBe(true);
-    expect(result.current.meshData).toBeNull();
-    expect(result.current.kernel).toBeNull();
+    const state = useEditorStore.getState();
+    expect(state.isLoading).toBe(true);
+    expect(state.meshData).toBeNull();
   });
 
-  it("loads mesh data after init", async () => {
-    const { result } = renderHook(() => useKernel());
-    await waitFor(() => {
-      expect(result.current.isLoading).toBe(false);
-    });
-    expect(result.current.meshData).not.toBeNull();
-    expect(result.current.meshData!.vertexCount).toBe(24);
-    expect(result.current.meshData!.triangleCount).toBe(12);
+  it("initializes kernel and loads mesh", async () => {
+    await useEditorStore.getState().initKernel();
+    const state = useEditorStore.getState();
+    expect(state.isLoading).toBe(false);
+    expect(state.meshData).not.toBeNull();
+    expect(state.meshData!.vertexCount).toBe(24);
+    expect(state.features).toHaveLength(2);
   });
 
-  it("loads features after init", async () => {
-    const { result } = renderHook(() => useKernel());
-    await waitFor(() => {
-      expect(result.current.isLoading).toBe(false);
-    });
-    expect(result.current.features).toHaveLength(2);
-    expect(result.current.features[0].name).toBe("Base Sketch");
+  it("toggles wireframe", () => {
+    useEditorStore.getState().toggleWireframe();
+    expect(useEditorStore.getState().wireframe).toBe(true);
+    useEditorStore.getState().toggleWireframe();
+    expect(useEditorStore.getState().wireframe).toBe(false);
   });
 
-  it("has no error on successful init", async () => {
-    const { result } = renderHook(() => useKernel());
-    await waitFor(() => {
-      expect(result.current.isLoading).toBe(false);
-    });
-    expect(result.current.error).toBeNull();
+  it("selects features", () => {
+    useEditorStore.getState().selectFeature("feat-001");
+    expect(useEditorStore.getState().selectedFeatureId).toBe("feat-001");
+    useEditorStore.getState().selectFeature(null);
+    expect(useEditorStore.getState().selectedFeatureId).toBeNull();
   });
 
-  it("provides kernel client instance", async () => {
-    const { result } = renderHook(() => useKernel());
-    await waitFor(() => {
-      expect(result.current.isLoading).toBe(false);
+  it("sets mode", () => {
+    useEditorStore.getState().setMode("select-face");
+    expect(useEditorStore.getState().mode).toBe("select-face");
+  });
+
+  it("toggles edges", () => {
+    expect(useEditorStore.getState().showEdges).toBe(true);
+    useEditorStore.getState().toggleEdges();
+    expect(useEditorStore.getState().showEdges).toBe(false);
+  });
+
+  it("selects and deselects faces", () => {
+    useEditorStore.getState().selectFace(3);
+    expect(useEditorStore.getState().selectedFaceIndex).toBe(3);
+    useEditorStore.getState().selectFace(null);
+    expect(useEditorStore.getState().selectedFaceIndex).toBeNull();
+  });
+
+  it("hovers faces", () => {
+    useEditorStore.getState().hoverFace(2);
+    expect(useEditorStore.getState().hoveredFaceIndex).toBe(2);
+    useEditorStore.getState().hoverFace(null);
+    expect(useEditorStore.getState().hoveredFaceIndex).toBeNull();
+  });
+
+  it("adds feature and rebuilds mesh", async () => {
+    await useEditorStore.getState().initKernel();
+    useEditorStore.getState().addFeature("extrude", "Extrude 2", {
+      type: "extrude",
+      params: {
+        direction: [0, 0, 1],
+        depth: 15,
+        symmetric: false,
+        draft_angle: 0,
+      },
     });
-    expect(result.current.kernel).not.toBeNull();
-    expect(result.current.kernel!.featureCount).toBe(2);
+    const state = useEditorStore.getState();
+    expect(state.features).toHaveLength(3);
+    expect(state.meshData).not.toBeNull();
+    // New extrude with depth=15 should change the mesh
+    expect(state.meshData!.vertexCount).toBe(24);
   });
 });

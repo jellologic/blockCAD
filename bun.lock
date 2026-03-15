@@ -60,6 +60,7 @@
         "three": "^0.175.0",
         "vite-tsconfig-paths": "^5.1.4",
         "zod": "catalog:",
+        "zustand": "^5.0.0",
       },
       "devDependencies": {
         "@blockCAD/config": "workspace:*",

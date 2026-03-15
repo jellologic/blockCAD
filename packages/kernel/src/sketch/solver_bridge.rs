@@ -1,6 +1,8 @@
 use crate::error::{KernelError, KernelResult};
 use crate::solver::equations::{
-    CoincidentEquation, DistanceEquation, FixedEquation, PerpendicularEquation,
+    AngleEquation, CoincidentEquation, CollinearEquation, DistanceEquation, EqualLengthEquation,
+    FixedEquation, MidpointEquation, ParallelEquation, PerpendicularEquation, RadiusEquation,
+    SymmetricMidpointEquation, SymmetricPerpendicularEquation,
 };
 use crate::solver::graph::ConstraintGraph;
 use crate::solver::variable::Variable;
@@ -159,17 +161,150 @@ pub fn build_constraint_graph(sketch: &Sketch) -> KernelResult<(ConstraintGraph,
                 }
             }
 
-            // Constraint types not yet mapped to equations — skip for now
-            ConstraintKind::Collinear
-            | ConstraintKind::Parallel
-            | ConstraintKind::Tangent
-            | ConstraintKind::Symmetric { .. }
-            | ConstraintKind::Midpoint
-            | ConstraintKind::Angle { .. }
-            | ConstraintKind::Radius { .. }
-            | ConstraintKind::Diameter { .. }
-            | ConstraintKind::Equal => {
-                // TODO: Implement these constraint equation mappings
+            ConstraintKind::Parallel => {
+                // Two lines must be parallel (cross product of directions = 0)
+                let line1 = sketch.entities.get(constraint.entities[0])?;
+                let line2 = sketch.entities.get(constraint.entities[1])?;
+                if let (
+                    SketchEntity::Line { start: s1, end: e1 },
+                    SketchEntity::Line { start: s2, end: e2 },
+                ) = (line1, line2)
+                {
+                    let (x1, y1) = var_map.point_vars(*s1).unwrap();
+                    let (x2, y2) = var_map.point_vars(*e1).unwrap();
+                    let (x3, y3) = var_map.point_vars(*s2).unwrap();
+                    let (x4, y4) = var_map.point_vars(*e2).unwrap();
+                    graph.add_equation(Box::new(ParallelEquation::new(
+                        x1, y1, x2, y2, x3, y3, x4, y4,
+                    )));
+                }
+            }
+
+            ConstraintKind::Collinear => {
+                // Two lines are collinear: all 4 points on same line.
+                // We enforce: line2.start on line1, line2.end on line1
+                let line1 = sketch.entities.get(constraint.entities[0])?;
+                let line2 = sketch.entities.get(constraint.entities[1])?;
+                if let (
+                    SketchEntity::Line { start: s1, end: e1 },
+                    SketchEntity::Line { start: s2, end: e2 },
+                ) = (line1, line2)
+                {
+                    let (ax, ay) = var_map.point_vars(*s1).unwrap();
+                    let (bx, by) = var_map.point_vars(*e1).unwrap();
+                    let (cx, cy) = var_map.point_vars(*s2).unwrap();
+                    let (dx, dy) = var_map.point_vars(*e2).unwrap();
+                    graph.add_equation(Box::new(CollinearEquation::new(ax, ay, bx, by, cx, cy)));
+                    graph.add_equation(Box::new(CollinearEquation::new(ax, ay, bx, by, dx, dy)));
+                }
+            }
+
+            ConstraintKind::Angle { value, .. } => {
+                // Angle between two lines
+                let line1 = sketch.entities.get(constraint.entities[0])?;
+                let line2 = sketch.entities.get(constraint.entities[1])?;
+                if let (
+                    SketchEntity::Line { start: s1, end: e1 },
+                    SketchEntity::Line { start: s2, end: e2 },
+                ) = (line1, line2)
+                {
+                    let (x1, y1) = var_map.point_vars(*s1).unwrap();
+                    let (x2, y2) = var_map.point_vars(*e1).unwrap();
+                    let (x3, y3) = var_map.point_vars(*s2).unwrap();
+                    let (x4, y4) = var_map.point_vars(*e2).unwrap();
+                    graph.add_equation(Box::new(AngleEquation::new(
+                        x1, y1, x2, y2, x3, y3, x4, y4, *value,
+                    )));
+                }
+            }
+
+            ConstraintKind::Midpoint => {
+                // Point C is midpoint of points A and B
+                let (ax, ay) = var_map.point_vars(constraint.entities[0]).ok_or_else(|| {
+                    KernelError::Internal("Midpoint: entity 0 not a point".into())
+                })?;
+                let (bx, by) = var_map.point_vars(constraint.entities[1]).ok_or_else(|| {
+                    KernelError::Internal("Midpoint: entity 1 not a point".into())
+                })?;
+                let (cx, cy) = var_map.point_vars(constraint.entities[2]).ok_or_else(|| {
+                    KernelError::Internal("Midpoint: entity 2 not a point".into())
+                })?;
+                graph.add_equation(Box::new(MidpointEquation::new(ax, bx, cx)));
+                graph.add_equation(Box::new(MidpointEquation::new(ay, by, cy)));
+            }
+
+            ConstraintKind::Symmetric { axis } => {
+                // Two points symmetric about an axis line
+                let (p1x, p1y) = var_map.point_vars(constraint.entities[0]).ok_or_else(|| {
+                    KernelError::Internal("Symmetric: entity 0 not a point".into())
+                })?;
+                let (p2x, p2y) = var_map.point_vars(constraint.entities[1]).ok_or_else(|| {
+                    KernelError::Internal("Symmetric: entity 1 not a point".into())
+                })?;
+                let axis_line = sketch.entities.get(*axis)?;
+                if let SketchEntity::Line { start, end } = axis_line {
+                    let (ax, ay) = var_map.point_vars(*start).unwrap();
+                    let (bx, by) = var_map.point_vars(*end).unwrap();
+                    graph.add_equation(Box::new(SymmetricMidpointEquation::new(
+                        p1x, p1y, p2x, p2y, ax, ay, bx, by,
+                    )));
+                    graph.add_equation(Box::new(SymmetricPerpendicularEquation::new(
+                        p1x, p1y, p2x, p2y, ax, ay, bx, by,
+                    )));
+                }
+            }
+
+            ConstraintKind::Radius { value } => {
+                // Circle radius equals value
+                let circle_id = constraint.entities[0];
+                if let Some(r_var) = var_map.circle_radius_var(circle_id) {
+                    graph.add_equation(Box::new(RadiusEquation::new(r_var, *value)));
+                }
+            }
+
+            ConstraintKind::Diameter { value } => {
+                // Circle diameter equals value → radius = value/2
+                let circle_id = constraint.entities[0];
+                if let Some(r_var) = var_map.circle_radius_var(circle_id) {
+                    graph.add_equation(Box::new(RadiusEquation::new(r_var, *value / 2.0)));
+                }
+            }
+
+            ConstraintKind::Equal => {
+                // Two lines have equal length (or two circles have equal radius)
+                let e1 = sketch.entities.get(constraint.entities[0])?;
+                let e2 = sketch.entities.get(constraint.entities[1])?;
+                match (e1, e2) {
+                    (
+                        SketchEntity::Line { start: s1, end: e1 },
+                        SketchEntity::Line { start: s2, end: e2 },
+                    ) => {
+                        let (x1, y1) = var_map.point_vars(*s1).unwrap();
+                        let (x2, y2) = var_map.point_vars(*e1).unwrap();
+                        let (x3, y3) = var_map.point_vars(*s2).unwrap();
+                        let (x4, y4) = var_map.point_vars(*e2).unwrap();
+                        graph.add_equation(Box::new(EqualLengthEquation::new(
+                            x1, y1, x2, y2, x3, y3, x4, y4,
+                        )));
+                    }
+                    (
+                        SketchEntity::Circle { .. },
+                        SketchEntity::Circle { .. },
+                    ) => {
+                        if let (Some(r1), Some(r2)) = (
+                            var_map.circle_radius_var(constraint.entities[0]),
+                            var_map.circle_radius_var(constraint.entities[1]),
+                        ) {
+                            graph.add_equation(Box::new(CoincidentEquation::new(r1, r2)));
+                        }
+                    }
+                    _ => {} // Unsupported entity combination
+                }
+            }
+
+            ConstraintKind::Tangent => {
+                // Tangent between line and circle (or two circles) — complex, skip for now
+                // TODO: Implement tangent constraint equations
             }
         }
     }

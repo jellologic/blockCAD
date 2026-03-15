@@ -7,6 +7,7 @@ export interface MeshData {
   normals: Float32Array;
   uvs: Float32Array;
   indices: Uint32Array;
+  faceIds: Uint32Array;
   vertexCount: number;
   triangleCount: number;
 }
@@ -36,12 +37,16 @@ export function parseMeshBytes(buffer: ArrayBuffer): MeshData {
   offset += 4;
 
   const indices = new Uint32Array(buffer, offset, triangleCount * 3);
+  offset += triangleCount * 3 * 4;
+
+  const faceIds = new Uint32Array(buffer, offset, triangleCount);
 
   return {
     positions,
     normals,
     uvs,
     indices,
+    faceIds,
     vertexCount,
     triangleCount,
   };

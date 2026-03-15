@@ -1,7 +1,6 @@
-import { useState } from "react";
+import { useEffect } from "react";
 import { createFileRoute } from "@tanstack/react-router";
-
-import { useKernel } from "@/hooks/use-kernel";
+import { useEditorStore } from "@/stores/editor-store";
 import { CadViewport } from "@/components/viewport/cad-viewport";
 import { FeatureTree } from "@/components/editor/feature-tree";
 import { Toolbar } from "@/components/editor/toolbar";
@@ -11,10 +10,11 @@ export const Route = createFileRoute("/editor")({
 });
 
 function EditorPage() {
-  const { meshData, features, isLoading, error } = useKernel();
-  const [selectedFeature, setSelectedFeature] = useState<string | null>(null);
-  const [wireframe, setWireframe] = useState(false);
-  const [showEdges, setShowEdges] = useState(true);
+  const { isLoading, error, initKernel } = useEditorStore();
+
+  useEffect(() => {
+    initKernel();
+  }, [initKernel]);
 
   if (error) {
     return (
@@ -26,29 +26,16 @@ function EditorPage() {
 
   return (
     <div className="grid h-full grid-cols-[280px_1fr] overflow-hidden">
-      <FeatureTree
-        features={features}
-        selectedId={selectedFeature}
-        onSelect={setSelectedFeature}
-      />
+      <FeatureTree />
       <div className="flex flex-col overflow-hidden">
-        <Toolbar
-          wireframe={wireframe}
-          showEdges={showEdges}
-          onToggleWireframe={() => setWireframe((w) => !w)}
-          onToggleEdges={() => setShowEdges((e) => !e)}
-        />
+        <Toolbar />
         <div className="relative flex-1">
-          {isLoading || !meshData ? (
+          {isLoading ? (
             <div className="flex h-full items-center justify-center bg-[#1a1a2e]">
               <p className="text-white/40">Loading kernel...</p>
             </div>
           ) : (
-            <CadViewport
-              meshData={meshData}
-              wireframe={wireframe}
-              showEdges={showEdges}
-            />
+            <CadViewport />
           )}
         </div>
       </div>

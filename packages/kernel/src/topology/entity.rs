@@ -6,14 +6,16 @@ pub use crate::id::EntityId;
 /// A generational arena for storing B-Rep entities.
 /// Provides O(1) insert, lookup, and remove with generation tracking
 /// to detect stale references.
-#[derive(Debug)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(bound = "T: serde::Serialize + serde::de::DeserializeOwned")]
 pub struct EntityStore<T> {
     entries: Vec<Entry<T>>,
     free_list: Vec<u32>,
     len: usize,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(bound = "T: serde::Serialize + serde::de::DeserializeOwned")]
 enum Entry<T> {
     Occupied { generation: u32, value: T },
     Vacant { generation: u32 },
