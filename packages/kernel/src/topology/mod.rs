@@ -1,0 +1,21 @@
+pub mod body;
+pub mod brep;
+pub mod coedge;
+pub mod edge;
+pub mod entity;
+pub mod face;
+pub mod loop_;
+pub mod shell;
+pub mod solid;
+pub mod vertex;
+
+pub use body::Body;
+pub use brep::BRep;
+pub use coedge::{CoEdge, CoEdgeId};
+pub use edge::{Edge, EdgeId};
+pub use entity::{EntityId, EntityStore};
+pub use face::{Face, FaceId};
+pub use loop_::{Loop, LoopId};
+pub use shell::{Shell, ShellId};
+pub use solid::{Solid, SolidId};
+pub use vertex::{Vertex, VertexId};

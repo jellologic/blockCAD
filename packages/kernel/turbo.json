@@ -1,0 +1,22 @@
+{
+  "extends": ["//"],
+  "tasks": {
+    "build": {
+      "inputs": [
+        "src/**/*.rs",
+        "Cargo.toml",
+        "Cargo.lock",
+        "rust-toolchain.toml"
+      ],
+      "outputs": ["pkg/**", "pkg-server/**"]
+    },
+    "test:rust": {
+      "inputs": ["src/**/*.rs", "tests/**/*.rs", "Cargo.toml", "Cargo.lock"],
+      "outputs": []
+    },
+    "lint": {
+      "inputs": ["src/**/*.rs", "Cargo.toml"],
+      "outputs": []
+    }
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "name": "@blockCAD/kernel",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": {
+      "default": "./src/index.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc --build",
+    "check-types": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@blockCAD/kernel-wasm": "workspace:*"
+  },
+  "devDependencies": {
+    "@blockCAD/config": "workspace:*",
+    "typescript": "^5"
+  }
+}

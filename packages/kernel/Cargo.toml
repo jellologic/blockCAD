@@ -1,0 +1,40 @@
+[package]
+name = "blockcad-kernel"
+version = "0.1.0"
+edition = "2021"
+description = "Parametric CAD kernel for blockCAD"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[features]
+default = ["client"]
+client = []
+server = ["client"]
+wasm = ["wasm-bindgen", "js-sys", "web-sys", "console_error_panic_hook"]
+
+[dependencies]
+nalgebra = { version = "0.33", default-features = false, features = ["std", "serde-serialize"] }
+thiserror = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+uuid = { version = "1", features = ["v4", "js"] }
+faer = { version = "0.19", default-features = false, features = ["std"] }
+
+# WASM bindings (feature-gated)
+wasm-bindgen = { version = "0.2", optional = true }
+js-sys = { version = "0.3", optional = true }
+web-sys = { version = "0.3", optional = true, features = ["console"] }
+console_error_panic_hook = { version = "0.1", optional = true }
+
+[dev-dependencies]
+approx = "0.5"
+wasm-bindgen-test = "0.3"
+
+[lints.clippy]
+unwrap_used = "warn"
+expect_used = "warn"
+
+[profile.release]
+opt-level = "z"
+lto = true

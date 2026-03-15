@@ -1,0 +1,13 @@
+{
+  "name": "@blockCAD/kernel-wasm",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "build": "wasm-pack build --target web --out-dir pkg --features wasm,client",
+    "build:server": "wasm-pack build --target nodejs --out-dir pkg-server --features wasm,server",
+    "test:rust": "cargo test --features server",
+    "test:client": "cargo test --features client",
+    "lint": "cargo clippy --features server -- -D warnings",
+    "fmt": "cargo fmt --check"
+  }
+}
