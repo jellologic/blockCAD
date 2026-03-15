@@ -16,6 +16,7 @@ describe("editor store", () => {
       hoveredFaceIndex: null,
       wireframe: false,
       showEdges: true,
+      activeOperation: null,
     });
   });
 

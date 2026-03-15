@@ -1,9 +1,11 @@
 import { useEffect } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { useEditorStore } from "@/stores/editor-store";
+import { CommandManager } from "@/components/editor/command-manager";
+import { LeftPanel } from "@/components/editor/left-panel";
 import { CadViewport } from "@/components/viewport/cad-viewport";
-import { FeatureTree } from "@/components/editor/feature-tree";
-import { Toolbar } from "@/components/editor/toolbar";
+import { StatusBar } from "@/components/editor/status-bar";
+import { useKeyboardShortcuts } from "@/hooks/use-keyboard-shortcuts";
 
 export const Route = createFileRoute("/editor")({
   component: EditorPage,
@@ -12,33 +14,36 @@ export const Route = createFileRoute("/editor")({
 function EditorPage() {
   const { isLoading, error, initKernel } = useEditorStore();
 
+  useKeyboardShortcuts();
+
   useEffect(() => {
     initKernel();
   }, [initKernel]);
 
   if (error) {
     return (
-      <div className="flex h-full items-center justify-center bg-[#1a1a2e] text-red-400">
+      <div className="flex h-svh items-center justify-center bg-[var(--cad-bg-viewport)] text-[var(--cad-icon-error)]">
         <p>Kernel error: {error.message}</p>
       </div>
     );
   }
 
   return (
-    <div className="grid h-full grid-cols-[280px_1fr] overflow-hidden">
-      <FeatureTree />
-      <div className="flex flex-col overflow-hidden">
-        <Toolbar />
-        <div className="relative flex-1">
+    <div className="grid h-svh grid-rows-[auto_1fr_24px]">
+      <CommandManager />
+      <div className="grid grid-cols-[280px_1fr] overflow-hidden">
+        <LeftPanel />
+        <div className="relative overflow-hidden">
           {isLoading ? (
-            <div className="flex h-full items-center justify-center bg-[#1a1a2e]">
-              <p className="text-white/40">Loading kernel...</p>
+            <div className="flex h-full items-center justify-center bg-[var(--cad-bg-viewport)]">
+              <p className="text-[var(--cad-text-muted)]">Loading kernel...</p>
             </div>
           ) : (
             <CadViewport />
           )}
         </div>
       </div>
+      <StatusBar />
     </div>
   );
 }
