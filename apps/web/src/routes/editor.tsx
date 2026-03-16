@@ -1,10 +1,12 @@
 import { useEffect } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { useEditorStore } from "@/stores/editor-store";
+import { useAssemblyStore } from "@/stores/assembly-store";
 import { CommandManager } from "@/components/editor/command-manager";
 import { LeftPanel } from "@/components/editor/left-panel";
 import { CadViewport } from "@/components/viewport/cad-viewport";
 import { StatusBar } from "@/components/editor/status-bar";
+import { BomDialog } from "@/components/assembly/bom-dialog";
 import { useKeyboardShortcuts } from "@/hooks/use-keyboard-shortcuts";
 
 export const Route = createFileRoute("/editor")({
@@ -20,9 +22,10 @@ function EditorPage() {
     initKernel();
   }, [initKernel]);
 
-  // Expose store for e2e testing
+  // Expose stores for e2e testing
   useEffect(() => {
     (window as any).__editorStore = useEditorStore;
+    (window as any).__assemblyStore = useAssemblyStore;
   }, []);
 
   if (error) {
@@ -49,6 +52,7 @@ function EditorPage() {
         </div>
       </div>
       <StatusBar />
+      <BomDialog />
     </div>
   );
 }

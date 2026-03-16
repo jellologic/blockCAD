@@ -6,3 +6,5 @@ pub mod kernel_handle;
 pub mod mesh_handle;
 #[cfg(feature = "wasm")]
 pub mod sketch_handle;
+#[cfg(feature = "wasm")]
+pub mod assembly_handle;

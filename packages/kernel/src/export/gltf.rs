@@ -253,6 +253,114 @@ fn build_quantized_json(
     serde_json::to_string(&root).unwrap_or_default()
 }
 
+/// Export an assembly as GLB with per-component node hierarchy.
+///
+/// Each component becomes a separate glTF node with its own mesh and transform.
+/// `components` is a list of (name, mesh, 4×4 column-major transform).
+pub fn export_glb_assembly(
+    components: &[(String, TriMesh, [f64; 16])],
+    options: &GlbOptions,
+) -> KernelResult<Vec<u8>> {
+    if components.is_empty() {
+        // Return a minimal valid GLB with empty scene
+        let json = r#"{"asset":{"version":"2.0","generator":"blockCAD"},"scene":0,"scenes":[{"nodes":[]}]}"#;
+        return assemble_glb(json, &[]);
+    }
+
+    // Build BIN data: concatenate all mesh buffers
+    let mut bin_data = Vec::new();
+    let mut mesh_infos: Vec<(usize, usize, usize, usize, [f32; 3], [f32; 3])> = Vec::new(); // (pos_offset, pos_len, norm_len, idx_len, min, max)
+
+    for (_, mesh, _) in components {
+        let vc = mesh.vertex_count();
+        let tc = mesh.triangle_count();
+        let pos_offset = bin_data.len();
+        let pos_len = vc * 3 * 4;
+        let norm_len = vc * 3 * 4;
+        let idx_len = tc * 3 * 4;
+
+        for &v in &mesh.positions { bin_data.extend_from_slice(&v.to_le_bytes()); }
+        for &v in &mesh.normals { bin_data.extend_from_slice(&v.to_le_bytes()); }
+        for &i in &mesh.indices { bin_data.extend_from_slice(&i.to_le_bytes()); }
+
+        let (min_pos, max_pos) = compute_bounds(&mesh.positions);
+        mesh_infos.push((pos_offset, pos_len, norm_len, idx_len, min_pos, max_pos));
+    }
+
+    // Pad BIN to 4-byte alignment
+    while bin_data.len() % 4 != 0 { bin_data.push(0); }
+    let bin_padded = bin_data.len();
+
+    // Build JSON with per-component nodes
+    let mut nodes = Vec::new();
+    let mut meshes = Vec::new();
+    let mut accessors = Vec::new();
+    let mut buffer_views = Vec::new();
+    let node_indices: Vec<usize> = (0..components.len()).collect();
+
+    for (i, ((name, mesh, transform), (pos_offset, pos_len, norm_len, idx_len, min_pos, max_pos))) in
+        components.iter().zip(mesh_infos.iter()).enumerate()
+    {
+        let vc = mesh.vertex_count();
+        let tc = mesh.triangle_count();
+        let acc_base = accessors.len();
+        let bv_base = buffer_views.len();
+
+        // Buffer views: positions, normals, indices
+        let norm_offset = pos_offset + pos_len;
+        let idx_offset = norm_offset + norm_len;
+
+        buffer_views.push(serde_json::json!({ "buffer": 0, "byteOffset": pos_offset, "byteLength": pos_len, "target": 34962 }));
+        buffer_views.push(serde_json::json!({ "buffer": 0, "byteOffset": norm_offset, "byteLength": norm_len, "target": 34962 }));
+        buffer_views.push(serde_json::json!({ "buffer": 0, "byteOffset": idx_offset, "byteLength": idx_len, "target": 34963 }));
+
+        // Accessors
+        accessors.push(serde_json::json!({
+            "bufferView": bv_base, "componentType": 5126, "count": vc, "type": "VEC3",
+            "min": [min_pos[0], min_pos[1], min_pos[2]], "max": [max_pos[0], max_pos[1], max_pos[2]]
+        }));
+        accessors.push(serde_json::json!({
+            "bufferView": bv_base + 1, "componentType": 5126, "count": vc, "type": "VEC3"
+        }));
+        accessors.push(serde_json::json!({
+            "bufferView": bv_base + 2, "componentType": 5125, "count": tc * 3, "type": "SCALAR"
+        }));
+
+        // Mesh
+        meshes.push(serde_json::json!({
+            "primitives": [{ "attributes": { "POSITION": acc_base, "NORMAL": acc_base + 1 }, "indices": acc_base + 2, "mode": 4 }]
+        }));
+
+        // Node with transform (extract translation from 4×4 matrix)
+        let t = crate::geometry::transform::from_array(&{
+            let mut arr = [0.0f64; 16];
+            arr.copy_from_slice(transform);
+            arr
+        });
+        let translation = crate::geometry::transform::get_translation(&t);
+
+        nodes.push(serde_json::json!({
+            "mesh": i,
+            "name": name,
+            "translation": [translation.x, translation.y, translation.z]
+        }));
+    }
+
+    let root = serde_json::json!({
+        "asset": { "version": "2.0", "generator": "blockCAD" },
+        "scene": 0,
+        "scenes": [{ "nodes": node_indices }],
+        "nodes": nodes,
+        "meshes": meshes,
+        "accessors": accessors,
+        "bufferViews": buffer_views,
+        "buffers": [{ "byteLength": bin_padded }]
+    });
+
+    let json = serde_json::to_string(&root).unwrap_or_default();
+    assemble_glb(&json, &bin_data)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

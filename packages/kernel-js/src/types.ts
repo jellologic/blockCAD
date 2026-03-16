@@ -195,3 +195,37 @@ export interface KernelDocument {
   metadata: DocumentMetadata;
   features: FeatureEntry[];
 }
+
+// --- Assembly types ---
+
+export interface ComponentEntry {
+  id: string;
+  part_id: string;
+  name: string;
+  /** 4×4 column-major transform matrix */
+  transform: number[];
+  suppressed: boolean;
+}
+
+export type MateKind =
+  | "coincident"
+  | "concentric"
+  | { distance: { value: number } }
+  | { angle: { value: number } };
+
+export interface MateEntry {
+  id: string;
+  kind: MateKind;
+  component_a: string;
+  component_b: string;
+  suppressed: boolean;
+}
+
+export interface AssemblyDocument {
+  $schema?: string;
+  version: number;
+  metadata: DocumentMetadata;
+  parts: KernelDocument[];
+  components: ComponentEntry[];
+  mates: MateEntry[];
+}

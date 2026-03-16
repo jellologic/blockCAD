@@ -2,6 +2,7 @@ pub mod bbox;
 pub mod curve;
 pub mod serde_helpers;
 pub mod surface;
+pub mod transform;
 
 // Re-export nalgebra types as our canonical geometry primitives
 pub use nalgebra::{

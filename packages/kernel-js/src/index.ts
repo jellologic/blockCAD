@@ -1,6 +1,7 @@
 export { initKernel, isKernelInitialized } from "./init";
 export { KernelClient } from "./kernel";
 export { SketchClient } from "./sketch";
+export { AssemblyClient } from "./assembly";
 export type { SolveResult, SolvedEntity } from "./sketch";
 export type { MeshData } from "./mesh";
 export type {

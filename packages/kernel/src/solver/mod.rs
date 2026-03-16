@@ -1,6 +1,9 @@
 pub mod dof;
 pub mod equation;
 pub mod equations;
+pub mod equations_3d;
 pub mod graph;
 pub mod newton_raphson;
 pub mod variable;
+pub mod assembly_solver;
+pub mod graph_decomposition;

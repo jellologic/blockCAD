@@ -29,7 +29,7 @@ impl Variable {
 }
 
 /// Storage for solver variables, accessible by VariableId.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct VariableStore {
     variables: Vec<Variable>,
 }

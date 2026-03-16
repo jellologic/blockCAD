@@ -3,13 +3,14 @@ import {
   Box, RotateCw, Circle, Octagon, Grid3x3, RefreshCw, FlipHorizontal2,
   Minus, Square, Lock, MoveHorizontal, MoveVertical, Ruler, Spline,
   Eye, Layers, Network, Maximize2, BoxSelect, Pencil, Check, X, RulerIcon,
-  Download,
+  Download, Plus, Link, FileText, Combine,
 } from "lucide-react";
 import { RibbonButton } from "./ribbon-button";
 import { useEditorStore } from "@/stores/editor-store";
+import { useAssemblyStore } from "@/stores/assembly-store";
 import { usePreferencesStore } from "@/stores/preferences-store";
 
-type TabId = "features" | "sketch" | "view";
+type TabId = "features" | "sketch" | "view" | "assembly";
 
 function RibbonGroup({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -73,6 +74,16 @@ export function CommandManager() {
   const exportGLB = useEditorStore((s) => s.exportGLB);
   const hasMesh = useEditorStore((s) => s.meshData !== null);
 
+  // Assembly store
+  const isAssemblyMode = useAssemblyStore((s) => s.isAssemblyMode);
+  const initAssembly = useAssemblyStore((s) => s.initAssembly);
+  const exitAssemblyMode = useAssemblyStore((s) => s.exitAssemblyMode);
+  const startOp = useAssemblyStore((s) => s.startOp);
+  const toggleExploded = useAssemblyStore((s) => s.toggleExploded);
+  const showBom = useAssemblyStore((s) => s.showBom);
+  const exportAssemblyGLB = useAssemblyStore((s) => s.exportGLB);
+  const assemblyComponents = useAssemblyStore((s) => s.components);
+
   // Auto-switch ribbon tab based on mode
   useEffect(() => {
     if (mode === "sketch") {
@@ -82,9 +93,17 @@ export function CommandManager() {
     }
   }, [mode]);
 
+  // Auto-switch to/from assembly tab when assembly mode changes
+  useEffect(() => {
+    if (isAssemblyMode) {
+      setActiveTab("assembly");
+    }
+  }, [isAssemblyMode]);
+
   const tabs: { id: TabId; label: string }[] = [
     { id: "features", label: "Features" },
     { id: "sketch", label: "Sketch" },
+    { id: "assembly", label: "Assembly" },
     { id: "view", label: "View" },
   ];
 
@@ -235,6 +254,48 @@ export function CommandManager() {
                     <span className="text-[9px] text-[#cc3333] font-medium">Cancel</span>
                   </button>
                 </RibbonGroup>
+              )}
+            </>
+          )}
+          {activeTab === "assembly" && (
+            <>
+              <RibbonGroup label="Mode">
+                {!isAssemblyMode ? (
+                  <RibbonButton icon={Combine} label="Start" testId="assembly-start" onClick={initAssembly} />
+                ) : (
+                  <RibbonButton icon={X} label="Exit" testId="assembly-exit" onClick={exitAssemblyMode} />
+                )}
+              </RibbonGroup>
+              {isAssemblyMode && (
+                <>
+                  <RibbonGroup label="Component">
+                    <RibbonButton
+                      icon={Plus}
+                      label="Insert"
+                      testId="assembly-insert"
+                      onClick={() => startOp({ type: "insert-component", partId: "", name: "Component", x: 0, y: 0, z: 0 })}
+                    />
+                  </RibbonGroup>
+                  <RibbonGroup label="Mate">
+                    <div className="flex flex-col gap-0.5">
+                      <RibbonButton
+                        icon={Link}
+                        label="Add Mate"
+                        size="small"
+                        testId="assembly-mate"
+                        disabled={assemblyComponents.length < 2}
+                        onClick={() => startOp({ type: "add-mate", kind: "coincident", compA: "", compB: "", faceA: 0, faceB: 0 })}
+                      />
+                    </div>
+                  </RibbonGroup>
+                  <RibbonGroup label="Assembly">
+                    <div className="flex flex-col gap-0.5">
+                      <RibbonButton icon={Maximize2} label="Explode" size="small" testId="assembly-explode" onClick={toggleExploded} />
+                      <RibbonButton icon={FileText} label="BOM" size="small" testId="assembly-bom" onClick={showBom} />
+                      <RibbonButton icon={Download} label="Export" size="small" testId="assembly-export" onClick={exportAssemblyGLB} />
+                    </div>
+                  </RibbonGroup>
+                </>
               )}
             </>
           )}
