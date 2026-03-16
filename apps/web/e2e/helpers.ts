@@ -14,17 +14,40 @@ export async function waitForEditor(page: Page) {
   }, { timeout: 20000 });
 }
 
-/** Enter sketch mode on the given plane (programmatically, since plane selection requires 3D viewport click) */
+/** Enter sketch mode by clicking the Sketch ribbon button, then clicking the 3D plane.
+ *  Uses fixed viewport (1280x720) so the plane positions are predictable.
+ *  The front plane is at the center of the viewport in the default isometric camera. */
 export async function enterSketchMode(
   page: Page,
   plane: "front" | "top" | "right" = "front"
 ) {
-  await page.evaluate((p) => {
-    const store = (window as any).__editorStore;
-    if (store) {
-      store.getState().enterSketchMode(p);
-    }
-  }, plane);
+  // Click "Sketch" ribbon button to enter plane-selection mode
+  await page.locator('[data-testid="ribbon-sketch"]').click();
+
+  // Wait for the mode to switch to select-plane (planes become more opaque)
+  await page.waitForTimeout(300);
+
+  // Click on the canvas to select a reference plane.
+  // In the default isometric camera [20,15,20], the planes are visible near the center.
+  // The canvas sits inside the viewport div, taking up most of the right side.
+  const canvas = page.locator("canvas");
+  const box = await canvas.boundingBox();
+  if (!box) throw new Error("Canvas not found");
+
+  // Approximate click positions for each plane in the default isometric view:
+  // Front plane (z=0, blue) — center-right of canvas
+  // Top plane (y=0, green) — center-bottom of canvas
+  // Right plane (x=0, red) — center-left of canvas
+  const clickPositions: Record<string, { x: number; y: number }> = {
+    front: { x: box.x + box.width * 0.55, y: box.y + box.height * 0.45 },
+    top:   { x: box.x + box.width * 0.45, y: box.y + box.height * 0.55 },
+    right: { x: box.x + box.width * 0.42, y: box.y + box.height * 0.40 },
+  };
+
+  const pos = clickPositions[plane];
+  await page.mouse.click(pos.x, pos.y);
+
+  // Wait for sketch mode to activate (confirm button appears)
   await expect(
     page.locator('[data-testid="sketch-confirm"]')
   ).toBeVisible({ timeout: 10000 });

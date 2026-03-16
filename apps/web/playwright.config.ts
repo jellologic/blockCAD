@@ -12,6 +12,7 @@ export default defineConfig({
     headless: false,
     screenshot: "only-on-failure",
     trace: "on-first-retry",
+    viewport: { width: 1280, height: 720 },
   },
   webServer: {
     command: `vite dev --port ${TEST_PORT}`,
