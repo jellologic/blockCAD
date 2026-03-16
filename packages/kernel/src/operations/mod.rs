@@ -10,12 +10,8 @@ pub mod shell;
 
 pub mod boolean;
 
-// Server-only operations (computationally expensive)
-#[cfg(feature = "server")]
 pub mod sweep;
-#[cfg(feature = "server")]
 pub mod loft;
-#[cfg(feature = "server")]
 pub mod draft;
 
 pub use traits::Operation;

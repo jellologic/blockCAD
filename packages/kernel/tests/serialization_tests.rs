@@ -153,11 +153,11 @@ fn feature_kind_snake_case() {
 }
 
 #[test]
-fn server_params_deserialize_on_any_build() {
-    let json = r#"{"type":"sweep","params":{"path_curve_index":0,"twist":0.5}}"#;
+fn sweep_params_deserialize() {
+    let json = r#"{"type":"sweep","params":{"twist":0.5}}"#;
     let p: FeatureParams = serde_json::from_str(json).unwrap();
     if let FeatureParams::Sweep(v) = &p {
-        assert_eq!(v["path_curve_index"], 0);
+        assert!((v.twist - 0.5).abs() < 1e-12);
     } else {
         panic!("Expected Sweep variant");
     }

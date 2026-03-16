@@ -25,10 +25,10 @@ pub enum FeatureParams {
     BooleanUnion(serde_json::Value),
     BooleanSubtract(serde_json::Value),
     BooleanIntersect(serde_json::Value),
-    Sweep(serde_json::Value),
-    Loft(serde_json::Value),
+    Sweep(crate::operations::sweep::SweepParams),
+    Loft(crate::operations::loft::LoftParams),
     Shell(crate::operations::shell::ShellParams),
-    Draft(serde_json::Value),
+    Draft(crate::operations::draft::DraftParams),
     LinearPattern(crate::operations::pattern::linear::LinearPatternParams),
     CircularPattern(crate::operations::pattern::circular::CircularPatternParams),
     Mirror(crate::operations::pattern::mirror::MirrorParams),
@@ -81,12 +81,11 @@ mod tests {
     }
 
     #[test]
-    fn server_params_roundtrip_as_value() {
-        let json_str = r#"{"type":"sweep","params":{"path_curve_index":0,"twist":0.5}}"#;
+    fn sweep_params_roundtrip() {
+        let json_str = r#"{"type":"sweep","params":{"twist":0.5}}"#;
         let p: FeatureParams = serde_json::from_str(json_str).unwrap();
         if let FeatureParams::Sweep(v) = &p {
-            assert_eq!(v["path_curve_index"], 0);
-            assert_eq!(v["twist"], 0.5);
+            assert!((v.twist - 0.5).abs() < 1e-12);
         } else {
             panic!("Expected Sweep variant");
         }

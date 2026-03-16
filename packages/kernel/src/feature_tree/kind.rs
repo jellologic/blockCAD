@@ -55,15 +55,9 @@ impl FeatureKind {
 
     /// Whether this operation requires the server feature
     pub fn requires_server(&self) -> bool {
-        matches!(
-            self,
-            FeatureKind::BooleanUnion
-                | FeatureKind::BooleanSubtract
-                | FeatureKind::BooleanIntersect
-                | FeatureKind::Sweep
-                | FeatureKind::Loft
-                | FeatureKind::Draft
-        )
+        // All operations are now client-side. This method exists for
+        // forward-compatibility with future server-only operations.
+        false
     }
 }
 
@@ -98,9 +92,11 @@ mod tests {
     }
 
     #[test]
-    fn server_ops_require_server() {
-        assert!(FeatureKind::BooleanUnion.requires_server());
-        assert!(FeatureKind::Sweep.requires_server());
-        assert!(FeatureKind::Loft.requires_server());
+    fn all_ops_are_client() {
+        // All operations have been promoted from server-only to client
+        assert!(!FeatureKind::BooleanUnion.requires_server());
+        assert!(!FeatureKind::Sweep.requires_server());
+        assert!(!FeatureKind::Loft.requires_server());
+        assert!(!FeatureKind::Draft.requires_server());
     }
 }

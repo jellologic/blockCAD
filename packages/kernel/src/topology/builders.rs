@@ -173,6 +173,78 @@ pub fn rebuild_brep_from_faces(faces: &[(Vec<Pt3>, Vec3)]) -> KernelResult<BRep>
     Ok(brep)
 }
 
+/// Build a solid from a sequence of profile rings connected by quad faces.
+///
+/// Each ring is a closed loop of 3D points. Adjacent rings are connected
+/// by quad side faces. Optionally cap start/end with planar faces.
+/// Used by: sweep, loft.
+pub fn build_brep_from_rings(
+    rings: &[Vec<Pt3>],
+    closed_path: bool,
+    cap_start: bool,
+    cap_end: bool,
+) -> KernelResult<BRep> {
+    if rings.len() < 2 {
+        return Err(crate::error::KernelError::InvalidParameter {
+            param: "rings".into(),
+            value: format!("Need at least 2 rings, got {}", rings.len()),
+        });
+    }
+    let n = rings[0].len();
+    if n < 3 {
+        return Err(crate::error::KernelError::InvalidParameter {
+            param: "ring".into(),
+            value: format!("Each ring needs at least 3 points, got {}", n),
+        });
+    }
+
+    let mut faces: Vec<(Vec<Pt3>, Vec3)> = Vec::new();
+    let num_segments = if closed_path { rings.len() } else { rings.len() - 1 };
+
+    for seg in 0..num_segments {
+        let next_seg = if closed_path { (seg + 1) % rings.len() } else { seg + 1 };
+
+        for edge in 0..n {
+            let next_edge = (edge + 1) % n;
+
+            let p0 = rings[seg][edge];
+            let p1 = rings[seg][next_edge];
+            let p2 = rings[next_seg][next_edge];
+            let p3 = rings[next_seg][edge];
+
+            let e1 = p1 - p0;
+            let e2 = p3 - p0;
+            let normal = e1.cross(&e2);
+            let len = normal.norm();
+            let normal = if len > 1e-12 { normal / len } else { Vec3::new(0.0, 0.0, 1.0) };
+
+            faces.push((vec![p0, p1, p2, p3], normal));
+        }
+    }
+
+    // Cap faces
+    if cap_start && !closed_path {
+        let start_pts: Vec<Pt3> = rings[0].iter().rev().copied().collect();
+        if start_pts.len() >= 3 {
+            let e1 = start_pts[1] - start_pts[0];
+            let e2 = start_pts[2] - start_pts[0];
+            let normal = e1.cross(&e2).normalize();
+            faces.push((start_pts, normal));
+        }
+    }
+    if cap_end && !closed_path {
+        let end_pts: Vec<Pt3> = rings.last().unwrap().clone();
+        if end_pts.len() >= 3 {
+            let e1 = end_pts[1] - end_pts[0];
+            let e2 = end_pts[2] - end_pts[0];
+            let normal = e1.cross(&e2).normalize();
+            faces.push((end_pts, normal));
+        }
+    }
+
+    rebuild_brep_from_faces(&faces)
+}
+
 /// Build a box (rectangular prism) BRep from width, height, depth on the XY plane.
 /// Origin is at (0, 0, 0), extends to (width, height, depth).
 pub fn build_box_brep(width: f64, height: f64, depth: f64) -> KernelResult<BRep> {
