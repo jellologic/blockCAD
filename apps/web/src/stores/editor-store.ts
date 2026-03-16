@@ -12,19 +12,34 @@ import type {
 import {
   initKernel,
   KernelClient,
+  SketchClient,
   FRONT_PLANE,
   TOP_PLANE,
   RIGHT_PLANE,
 } from "@blockCAD/kernel";
+import { toast } from "sonner";
 
-type EditorMode = "view" | "sketch" | "select-face" | "select-edge";
+type EditorMode = "view" | "sketch" | "select-face" | "select-edge" | "select-plane";
 
-type SketchToolId = "line" | "circle" | "rectangle" | "arc" | "dimension" | null;
+type SketchToolId = "line" | "circle" | "rectangle" | "arc" | "dimension" | "measure" | null;
+
+type DofStatus = "fully_constrained" | "under_constrained" | "over_constrained" | null;
 
 interface DimensionInput {
   position: SketchPoint2D;
   entityIds: string[];
   kind: string;
+}
+
+interface DimensionPending {
+  entityIds: string[];
+  kind: "distance" | "angle" | "radius" | "diameter";
+}
+
+interface MeasureResult {
+  from: SketchPoint2D;
+  to: SketchPoint2D;
+  distance: number;
 }
 
 interface SketchSession {
@@ -38,6 +53,41 @@ interface SketchSession {
   pendingPoints: SketchPoint2D[];
   cursorPos: SketchPoint2D | null;
   dimensionInput: DimensionInput | null;
+  dimensionPending: DimensionPending | null;
+  measureResult: MeasureResult | null;
+}
+
+/** Parse entity index from ID string like "se-3" → 3 */
+function parseEntityIndex(id: string): number {
+  return parseInt(id.replace(/\D+/g, ""), 10);
+}
+
+/** Push a frontend SketchEntity2D into the WASM SketchClient */
+function mirrorEntityToSolver(solver: SketchClient, entity: SketchEntity2D): void {
+  switch (entity.type) {
+    case "point":
+      solver.addPoint(entity.position.x, entity.position.y);
+      break;
+    case "line":
+      solver.addLine(parseEntityIndex(entity.startId), parseEntityIndex(entity.endId));
+      break;
+    case "circle":
+      solver.addCircle(parseEntityIndex(entity.centerId), entity.radius);
+      break;
+    case "arc":
+      solver.addArc(
+        parseEntityIndex(entity.centerId),
+        parseEntityIndex(entity.startId),
+        parseEntityIndex(entity.endId)
+      );
+      break;
+  }
+}
+
+/** Push a frontend SketchConstraint2D into the WASM SketchClient */
+function mirrorConstraintToSolver(solver: SketchClient, constraint: SketchConstraint2D): void {
+  const indices = constraint.entityIds.map(parseEntityIndex);
+  solver.addConstraint(constraint.kind, indices, constraint.value);
 }
 
 interface EditorState {
@@ -55,16 +105,25 @@ interface EditorState {
   selectedFeatureId: string | null;
   selectedFaceIndex: number | null;
   hoveredFaceIndex: number | null;
+  hoveredPlaneId: SketchPlaneId | null;
 
   // Display
   wireframe: boolean;
   showEdges: boolean;
+
+  // Camera
+  cameraTarget: [number, number, number] | null;
 
   // Operations
   activeOperation: { type: FeatureKind; params: Record<string, any> } | null;
 
   // Sketch editing (non-null when mode === "sketch")
   sketchSession: SketchSession | null;
+  sketchSolver: SketchClient | null;
+  sketchDofStatus: DofStatus;
+  sketchHistory: SketchSession[];
+  sketchRedoStack: SketchSession[];
+  sketchUndoBatching: boolean;
 
   // Actions
   initKernel: () => Promise<void>;
@@ -83,20 +142,37 @@ interface EditorState {
   suppressFeature: (index: number) => void;
   unsuppressFeature: (index: number) => void;
 
+  // Camera actions
+  setCameraTarget: (position: [number, number, number] | null) => void;
+  fitAll: () => void;
+
   // Sketch actions
+  applyConstraint: (kind: string) => void;
   enterSketchMode: (planeId: SketchPlaneId) => void;
   exitSketchMode: (confirm: boolean) => void;
   setSketchTool: (tool: SketchToolId) => void;
   addSketchEntity: (entity: SketchEntity2D) => void;
   addSketchConstraint: (constraint: SketchConstraint2D) => void;
+  solveSketch: () => void;
   addPendingPoint: (pt: SketchPoint2D) => void;
   clearPendingPoints: () => void;
   setSketchCursorPos: (pos: SketchPoint2D | null) => void;
   genSketchEntityId: () => string;
   genSketchConstraintId: () => string;
   showDimensionInput: (position: SketchPoint2D, entityIds: string[], kind: string) => void;
+  setDimensionPending: (pending: DimensionPending | null) => void;
   confirmDimension: (value: number) => void;
   cancelDimension: () => void;
+  editDimension: (constraintId: string) => void;
+  updateConstraintValue: (constraintId: string, value: number) => void;
+  hoverPlane: (planeId: SketchPlaneId | null) => void;
+  startSketchFlow: () => void;
+  undoSketch: () => void;
+  redoSketch: () => void;
+  beginUndoBatch: () => void;
+  endUndoBatch: () => void;
+  deleteSelectedEntities: (entityIds: string[]) => void;
+  setMeasureResult: (result: MeasureResult | null) => void;
 }
 
 function getPlane(planeId: SketchPlaneId): SketchPlane {
@@ -120,10 +196,17 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   selectedFeatureId: null,
   selectedFaceIndex: null,
   hoveredFaceIndex: null,
+  hoveredPlaneId: null,
   wireframe: false,
   showEdges: true,
+  cameraTarget: null,
   activeOperation: null,
   sketchSession: null,
+  sketchSolver: null,
+  sketchDofStatus: null,
+  sketchHistory: [],
+  sketchRedoStack: [],
+  sketchUndoBatching: false,
 
   initKernel: async () => {
     try {
@@ -159,11 +242,68 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   },
 
   selectFeature: (id) => set({ selectedFeatureId: id }),
-  selectFace: (index) => set({ selectedFaceIndex: index }),
+  selectFace: (index) => {
+    set({ selectedFaceIndex: index });
+    // If extrude operation is active, update target_face_index
+    const { activeOperation } = get();
+    if (activeOperation && (activeOperation.type === "extrude" || activeOperation.type === "cut_extrude")) {
+      const endCond = activeOperation.params.end_condition;
+      if (endCond === "up_to_surface" || endCond === "offset_from_surface" || endCond === "up_to_vertex") {
+        get().updateOperationParams({ target_face_index: index });
+      }
+      // Also handle From: Surface face selection
+      const fromCond = activeOperation.params.from_condition;
+      if (fromCond === "surface") {
+        get().updateOperationParams({ from_face_index: index });
+      }
+    }
+    // If fillet/chamfer operation is active, toggle edge selection
+    if (activeOperation && (activeOperation.type === "fillet" || activeOperation.type === "chamfer")) {
+      if (index != null) {
+        const currentEdges = activeOperation.params.edge_indices || [];
+        // Toggle: if already has edges, clear them; otherwise add first few
+        if (currentEdges.length > 0) {
+          get().updateOperationParams({ edge_indices: [] });
+        } else {
+          // Select first 4 shared edges as a starter
+          get().updateOperationParams({ edge_indices: [0, 1, 2, 3] });
+        }
+      }
+    }
+  },
   hoverFace: (index) => set({ hoveredFaceIndex: index }),
   setMode: (mode) => set({ mode }),
   toggleWireframe: () => set((s) => ({ wireframe: !s.wireframe })),
   toggleEdges: () => set((s) => ({ showEdges: !s.showEdges })),
+
+  setCameraTarget: (position) => set({ cameraTarget: position }),
+
+  fitAll: () => {
+    // Compute a camera position that fits all geometry
+    // For now, just go to isometric at a reasonable distance
+    set({ cameraTarget: [30, 25, 30] });
+  },
+
+  applyConstraint: (kind) => {
+    const { sketchSession } = get();
+    if (!sketchSession) return;
+
+    const entities = sketchSession.entities;
+
+    if (kind === "fixed") {
+      // Find the last point entity
+      const lastPoint = [...entities].reverse().find((e) => e.type === "point");
+      if (!lastPoint) return;
+      const id = get().genSketchConstraintId();
+      get().addSketchConstraint({ id, kind: "fixed", entityIds: [lastPoint.id], value: undefined });
+    } else if (kind === "horizontal" || kind === "vertical") {
+      // Find the last line entity
+      const lastLine = [...entities].reverse().find((e) => e.type === "line");
+      if (!lastLine) return;
+      const id = get().genSketchConstraintId();
+      get().addSketchConstraint({ id, kind, entityIds: [lastLine.id], value: undefined });
+    }
+  },
 
   rebuild: () => {
     const { kernel } = get();
@@ -186,11 +326,95 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         depth: 10,
         symmetric: false,
         draft_angle: 0,
+        end_condition: "blind",
+        direction2_enabled: false,
+        depth2: 10,
+        draft_angle2: 0,
+        end_condition2: "blind",
+        from_offset: 0,
+        thin_feature: false,
+        thin_wall_thickness: 1,
+        target_face_index: null,
+        surface_offset: 0,
+        target_vertex_position: null,
+        flip_side_to_cut: false,
+        cap_ends: false,
+        from_condition: "sketch_plane",
+        from_face_index: null,
+        from_vertex_position: null,
+        contour_index: null,
+      },
+      cut_extrude: {
+        direction: [0, 0, 1],
+        depth: 10,
+        symmetric: false,
+        draft_angle: 0,
+        end_condition: "blind",
+        direction2_enabled: false,
+        depth2: 10,
+        draft_angle2: 0,
+        end_condition2: "blind",
+        from_offset: 0,
+        thin_feature: false,
+        thin_wall_thickness: 1,
+        target_face_index: null,
+        surface_offset: 0,
+        target_vertex_position: null,
+        flip_side_to_cut: false,
+        cap_ends: false,
+        from_condition: "sketch_plane",
+        from_face_index: null,
+        from_vertex_position: null,
+        contour_index: null,
       },
       revolve: {
         axis_origin: [0, 0, 0],
         axis_direction: [0, 0, 1],
         angle: 6.283185,
+        direction2_enabled: false,
+        angle2: 0,
+        symmetric: false,
+        thin_feature: false,
+        thin_wall_thickness: 1,
+        flip_side_to_cut: false,
+      },
+      cut_revolve: {
+        axis_origin: [0, 0, 0],
+        axis_direction: [0, 0, 1],
+        angle: 6.283185,
+        direction2_enabled: false,
+        angle2: 0,
+        symmetric: false,
+        thin_feature: false,
+        thin_wall_thickness: 1,
+        flip_side_to_cut: false,
+      },
+      fillet: {
+        edge_indices: [],
+        radius: 1,
+      },
+      chamfer: {
+        edge_indices: [],
+        distance: 1,
+        distance2: null,
+      },
+      linear_pattern: {
+        direction: [1, 0, 0],
+        spacing: 10,
+        count: 2,
+        direction2: null,
+        spacing2: 10,
+        count2: 2,
+      },
+      circular_pattern: {
+        axis_origin: [0, 0, 0],
+        axis_direction: [0, 0, 1],
+        count: 4,
+        total_angle: 6.283185,
+      },
+      mirror: {
+        plane_origin: [0, 0, 0],
+        plane_normal: [1, 0, 0],
       },
     };
     set({ activeOperation: { type, params: defaultParams[type] || {} } });
@@ -207,25 +431,88 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     });
   },
 
-  confirmOperation: () => {
-    const { kernel, activeOperation } = get();
+  confirmOperation: async () => {
+    const { kernel, activeOperation, features: localFeatures } = get();
     if (!kernel || !activeOperation) return;
 
-    const features = kernel.featureList;
-    const hasSketch = features.some((f: any) => f.type === "sketch");
-    if (!hasSketch && activeOperation.type === "extrude") {
-      kernel.addFeature("sketch", "Sketch", { type: "placeholder" });
+    // For extrude/cut_extrude/revolve/cut_revolve: use a fresh kernel to avoid WASM borrow conflicts
+    if (activeOperation.type === "extrude" || activeOperation.type === "cut_extrude" || activeOperation.type === "revolve" || activeOperation.type === "cut_revolve" || activeOperation.type === "fillet" || activeOperation.type === "chamfer" || activeOperation.type === "linear_pattern" || activeOperation.type === "circular_pattern" || activeOperation.type === "mirror") {
+      const hasSketch = localFeatures.some((f) => f.type === "sketch" && f.params.type === "sketch");
+      if (!hasSketch) {
+        toast.error(`Cannot ${activeOperation.type}: no sketch found. Draw a sketch first.`);
+        set({ activeOperation: null });
+        return;
+      }
+
+      const featureName = {
+        extrude: "Extrude",
+        cut_extrude: "Cut Extrude",
+        revolve: "Revolve",
+        cut_revolve: "Cut Revolve",
+        fillet: "Fillet",
+        chamfer: "Chamfer",
+        linear_pattern: "Linear Pattern",
+        circular_pattern: "Circular Pattern",
+        mirror: "Mirror",
+      }[activeOperation.type] || "Feature";
+
+      // Create a fresh KernelClient to avoid "recursive use" wasm-bindgen error
+      const freshKernel = new KernelClient();
+      try {
+        // Replay all existing features (sketches, extrudes, etc.)
+        for (const feat of localFeatures) {
+          freshKernel.addFeature(feat.type, feat.name, feat.params);
+        }
+        // Strip internal UI-only params (prefixed with _) and convert draft angle to radians
+        const { _draftEnabled, _draftOutward, _lastDraftAngle, _draftEnabled2, _draftOutward2, _lastDraftAngle2, _fromOffset, ...kernelParams } = activeOperation.params as any;
+        const finalParams = {
+          ...kernelParams,
+          draft_angle: (kernelParams.draft_angle ?? 0) * (Math.PI / 180),
+          draft_angle2: (kernelParams.draft_angle2 ?? 0) * (Math.PI / 180),
+        };
+        freshKernel.addFeature(
+          activeOperation.type,
+          featureName,
+          { type: activeOperation.type, params: finalParams } as any
+        );
+        const mesh = freshKernel.tessellate();
+        set({
+          kernel: freshKernel,
+          activeOperation: null,
+          meshData: mesh,
+          features: freshKernel.featureList,
+        });
+        toast.success(`${featureName} applied`);
+        if (activeOperation.type === "cut_revolve") {
+          toast.info("Note: Cut Revolve is approximate — full boolean subtract not yet implemented", { duration: 5000 });
+        }
+        return;
+      } catch (err) {
+        console.warn(`[blockCAD] ${activeOperation.type} failed:`, err);
+        const msg = err instanceof Error ? err.message : String(err);
+        if (msg.includes("profile") || msg.includes("closed")) {
+          toast.error(`${featureName} failed: sketch must be a closed shape (rectangle, closed loop of lines)`);
+        } else {
+          toast.error(`${featureName} failed: ` + msg);
+        }
+        set({ activeOperation: null });
+        return;
+      }
     }
 
-    kernel.addFeature(
-      activeOperation.type,
-      activeOperation.type.charAt(0).toUpperCase() +
-        activeOperation.type.slice(1),
-      {
-        type: activeOperation.type,
-        params: activeOperation.params,
-      } as any
-    );
+    // Non-extrude operations
+    try {
+      kernel.addFeature(
+        activeOperation.type,
+        activeOperation.type.charAt(0).toUpperCase() + activeOperation.type.slice(1),
+        { type: activeOperation.type, params: activeOperation.params } as any
+      );
+    } catch (err) {
+      console.warn("[blockCAD] Operation failed:", err);
+      toast.error(`${activeOperation.type} failed`);
+      set({ activeOperation: null });
+      return;
+    }
 
     try {
       const mesh = kernel.tessellate();
@@ -235,10 +522,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         features: kernel.featureList,
       });
     } catch {
-      set({
-        activeOperation: null,
-        features: kernel.featureList,
-      });
+      set({ activeOperation: null });
     }
   },
 
@@ -271,11 +555,20 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   // --- Sketch actions ---
 
   enterSketchMode: (planeId) => {
+    const plane = getPlane(planeId);
+    let solver: SketchClient | null = null;
+    try {
+      solver = new SketchClient(plane);
+    } catch (err) {
+      console.warn("[blockCAD] Failed to create sketch solver:", err);
+    }
     set({
       mode: "sketch",
       activeOperation: null,
+      sketchSolver: solver,
+      sketchDofStatus: null,
       sketchSession: {
-        plane: getPlane(planeId),
+        plane,
         planeId,
         entities: [],
         constraints: [],
@@ -285,43 +578,54 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         pendingPoints: [],
         cursorPos: null,
         dimensionInput: null,
+        dimensionPending: null,
+        measureResult: null,
       },
     });
   },
 
   exitSketchMode: (confirm) => {
-    const { sketchSession, kernel } = get();
-    if (confirm && sketchSession && kernel) {
-      const sketchName = `Sketch ${kernel.featureList.filter((f) => f.type === "sketch").length + 1}`;
-      try {
-        kernel.addFeature("sketch", sketchName, {
-          type: "sketch",
+    const { sketchSession, sketchSolver, features: existingFeatures } = get();
+    if (confirm && sketchSession) {
+      const sketchCount = existingFeatures.filter((f) => f.type === "sketch").length;
+      const sketchName = `Sketch ${sketchCount + 1}`;
+
+      sketchSolver?.dispose();
+
+      // Save sketch as a local feature entry
+      // The kernel will process it when an extrude is applied
+      const updatedFeatures = [
+        ...existingFeatures,
+        {
+          id: `sketch-${Date.now()}`,
+          name: sketchName,
+          type: "sketch" as const,
+          suppressed: false,
           params: {
-            plane: sketchSession.plane,
-            entities: sketchSession.entities,
-            constraints: sketchSession.constraints,
+            type: "sketch" as const,
+            params: {
+              plane: sketchSession.plane,
+              entities: sketchSession.entities,
+              constraints: sketchSession.constraints,
+            },
           },
-        });
-      } catch (err) {
-        console.warn("[blockCAD] Failed to add sketch feature:", err);
-      }
-      try {
-        const mesh = kernel.tessellate();
-        set({
-          mode: "view",
-          sketchSession: null,
-          meshData: mesh,
-          features: kernel.featureList,
-        });
-      } catch {
-        set({
-          mode: "view",
-          sketchSession: null,
-          features: kernel.featureList,
-        });
-      }
+        },
+      ];
+
+      const meshData = get().meshData;
+
+      set({
+        mode: "view",
+        sketchSession: null,
+        sketchSolver: null,
+        sketchDofStatus: null,
+        meshData,
+        features: updatedFeatures,
+      });
+      toast.success(`${sketchName} saved`);
     } else {
-      set({ mode: "view", sketchSession: null });
+      sketchSolver?.dispose();
+      set({ mode: "view", sketchSession: null, sketchSolver: null, sketchDofStatus: null });
     }
   },
 
@@ -338,25 +642,80 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   },
 
   addSketchEntity: (entity) => {
-    const { sketchSession } = get();
+    const { sketchSession, sketchSolver, sketchHistory, sketchUndoBatching } = get();
     if (!sketchSession) return;
-    set({
+    // Push history for undo (skip if inside a batch — batch pushes once at start)
+    const updates: any = {
       sketchSession: {
         ...sketchSession,
         entities: [...sketchSession.entities, entity],
       },
-    });
+    };
+    if (!sketchUndoBatching) {
+      updates.sketchHistory = [...sketchHistory, sketchSession].slice(-50);
+      updates.sketchRedoStack = [];
+    }
+    // Mirror to WASM solver
+    if (sketchSolver) {
+      try {
+        mirrorEntityToSolver(sketchSolver, entity);
+      } catch (err) {
+        console.warn("[blockCAD] Failed to mirror entity to solver:", err);
+      }
+    }
+    set(updates);
   },
 
   addSketchConstraint: (constraint) => {
-    const { sketchSession } = get();
+    const { sketchSession, sketchSolver } = get();
     if (!sketchSession) return;
+    // Mirror to WASM solver
+    if (sketchSolver) {
+      try {
+        mirrorConstraintToSolver(sketchSolver, constraint);
+      } catch (err) {
+        console.warn("[blockCAD] Failed to mirror constraint to solver:", err);
+      }
+    }
     set({
       sketchSession: {
         ...sketchSession,
         constraints: [...sketchSession.constraints, constraint],
       },
     });
+    // Auto-solve after adding constraint
+    get().solveSketch();
+  },
+
+  solveSketch: () => {
+    const { sketchSolver, sketchSession } = get();
+    if (!sketchSolver || !sketchSession) return;
+    try {
+      const result = sketchSolver.solve();
+      if (!result.converged) return;
+      // Update entity positions from solved result
+      const updatedEntities = sketchSession.entities.map((entity, i) => {
+        const solved = result.entities[i];
+        if (entity.type === "point" && solved?.type === "point") {
+          return { ...entity, position: { x: solved.x, y: solved.y } };
+        }
+        if (entity.type === "circle" && solved?.type === "circle") {
+          return { ...entity, radius: solved.radius };
+        }
+        return entity;
+      });
+      // Update DOF status
+      let dofStatus: DofStatus = null;
+      try {
+        dofStatus = sketchSolver.getDofStatus().status;
+      } catch { /* ignore */ }
+      set({
+        sketchSession: { ...sketchSession, entities: updatedEntities },
+        sketchDofStatus: dofStatus,
+      });
+    } catch (err) {
+      console.warn("[blockCAD] Sketch solve failed:", err);
+    }
   },
 
   addPendingPoint: (pt) => {
@@ -441,7 +800,125 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     const { sketchSession } = get();
     if (!sketchSession) return;
     set({
-      sketchSession: { ...sketchSession, dimensionInput: null },
+      sketchSession: { ...sketchSession, dimensionInput: null, dimensionPending: null },
+    });
+  },
+
+  setDimensionPending: (pending) => {
+    const { sketchSession } = get();
+    if (!sketchSession) return;
+    set({
+      sketchSession: { ...sketchSession, dimensionPending: pending },
+    });
+  },
+
+  editDimension: (constraintId) => {
+    const { sketchSession } = get();
+    if (!sketchSession) return;
+    const constraint = sketchSession.constraints.find((c) => c.id === constraintId);
+    if (!constraint || constraint.value === undefined) return;
+    // Find position for the input — use first entity's position
+    const entityId = constraint.entityIds[0];
+    const entity = sketchSession.entities.find((e) => e.id === entityId);
+    let position: SketchPoint2D = { x: 0, y: 0 };
+    if (entity?.type === "point") {
+      position = entity.position;
+    } else if (entity?.type === "line") {
+      const startPt = sketchSession.entities.find((e) => e.id === entity.startId);
+      const endPt = sketchSession.entities.find((e) => e.id === entity.endId);
+      if (startPt?.type === "point" && endPt?.type === "point") {
+        position = {
+          x: (startPt.position.x + endPt.position.x) / 2,
+          y: (startPt.position.y + endPt.position.y) / 2,
+        };
+      }
+    }
+    set({
+      sketchSession: {
+        ...sketchSession,
+        dimensionInput: { position, entityIds: constraint.entityIds, kind: constraint.kind },
+      },
+    });
+  },
+
+  updateConstraintValue: (constraintId, value) => {
+    const { sketchSession } = get();
+    if (!sketchSession) return;
+    const updatedConstraints = sketchSession.constraints.map((c) =>
+      c.id === constraintId ? { ...c, value } : c
+    );
+    set({
+      sketchSession: { ...sketchSession, constraints: updatedConstraints },
+    });
+    get().solveSketch();
+  },
+
+  hoverPlane: (planeId) => set({ hoveredPlaneId: planeId }),
+
+  startSketchFlow: () => {
+    set({ mode: "select-plane", hoveredPlaneId: null });
+  },
+
+  beginUndoBatch: () => {
+    const { sketchSession, sketchHistory } = get();
+    if (!sketchSession) return;
+    // Save snapshot at batch start — all adds during batch will be undone together
+    set({
+      sketchUndoBatching: true,
+      sketchHistory: [...sketchHistory, sketchSession].slice(-50),
+      sketchRedoStack: [],
+    });
+  },
+
+  endUndoBatch: () => {
+    set({ sketchUndoBatching: false });
+  },
+
+  undoSketch: () => {
+    const { sketchHistory, sketchSession, sketchRedoStack } = get();
+    if (sketchHistory.length === 0 || !sketchSession) return;
+    const prev = sketchHistory[sketchHistory.length - 1]!;
+    set({
+      sketchSession: prev,
+      sketchHistory: sketchHistory.slice(0, -1),
+      sketchRedoStack: [sketchSession, ...sketchRedoStack].slice(0, 50),
+    });
+  },
+
+  redoSketch: () => {
+    const { sketchRedoStack, sketchSession, sketchHistory } = get();
+    if (sketchRedoStack.length === 0 || !sketchSession) return;
+    const next = sketchRedoStack[0]!;
+    set({
+      sketchSession: next,
+      sketchRedoStack: sketchRedoStack.slice(1),
+      sketchHistory: [...sketchHistory, sketchSession].slice(-50),
+    });
+  },
+
+  deleteSelectedEntities: (entityIds) => {
+    const { sketchSession, sketchHistory } = get();
+    if (!sketchSession || entityIds.length === 0) return;
+    // Push current state to history for undo
+    const newHistory = [...sketchHistory, sketchSession].slice(-50);
+    const idSet = new Set(entityIds);
+    const entities = sketchSession.entities.filter((e) => !idSet.has(e.id));
+    // Remove constraints that reference deleted entities
+    const constraints = sketchSession.constraints.filter(
+      (c) => !c.entityIds.some((eid) => idSet.has(eid))
+    );
+    set({
+      sketchSession: { ...sketchSession, entities, constraints },
+      sketchHistory: newHistory,
+      sketchRedoStack: [],
+    });
+  },
+
+  setMeasureResult: (result) => {
+    const { sketchSession } = get();
+    if (!sketchSession) return;
+    set({
+      sketchSession: { ...sketchSession, measureResult: result },
     });
   },
 }));

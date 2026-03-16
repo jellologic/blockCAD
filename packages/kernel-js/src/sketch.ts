@@ -105,6 +105,19 @@ export class SketchClient {
     this.handle.update_point(entityIndex, x, y);
   }
 
+  /** Get the DOF status of the sketch. */
+  getDofStatus(): {
+    status: "fully_constrained" | "under_constrained" | "over_constrained";
+    dof?: number;
+    redundant?: number;
+  } {
+    try {
+      return JSON.parse(this.handle.dof_status());
+    } catch (err) {
+      throw KernelError.fromWasm(String(err));
+    }
+  }
+
   /** Free WASM memory. */
   dispose(): void {
     this.handle.free();

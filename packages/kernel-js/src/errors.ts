@@ -25,10 +25,16 @@ export class KernelError extends Error {
   }
 
   /**
-   * Parse a JSON error string from the WASM boundary.
+   * Parse an error from the WASM boundary.
+   * Handles both JSON error objects and plain text error strings.
    */
-  static fromWasm(json: string): KernelError {
-    const parsed = JSON.parse(json) as { kind: KernelErrorKind; message: string };
-    return new KernelError(parsed.kind, parsed.message);
+  static fromWasm(errorStr: string): KernelError {
+    try {
+      const parsed = JSON.parse(errorStr) as { kind: KernelErrorKind; message: string };
+      return new KernelError(parsed.kind, parsed.message);
+    } catch {
+      // Not JSON — treat as plain error message
+      return new KernelError("internal", errorStr);
+    }
   }
 }

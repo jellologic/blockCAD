@@ -1,6 +1,12 @@
 import { Check, X } from "lucide-react";
 import { useEditorStore } from "@/stores/editor-store";
 import { ExtrudePanel } from "./extrude-panel";
+import { RevolvePanel } from "./revolve-panel";
+import { FilletPanel } from "./fillet-panel";
+import { ChamferPanel } from "./chamfer-panel";
+import { LinearPatternPanel } from "./linear-pattern-panel";
+import { CircularPatternPanel } from "./circular-pattern-panel";
+import { MirrorPanel } from "./mirror-panel";
 
 export function PropertyManager() {
   const activeOperation = useEditorStore((s) => s.activeOperation);
@@ -9,7 +15,19 @@ export function PropertyManager() {
 
   if (!activeOperation) return null;
 
-  const title = activeOperation.type.charAt(0).toUpperCase() + activeOperation.type.slice(1);
+  const displayNames: Record<string, string> = {
+    extrude: "Extrude",
+    cut_extrude: "Cut Extrude",
+    revolve: "Revolve",
+    cut_revolve: "Cut Revolve",
+    fillet: "Fillet",
+    chamfer: "Chamfer",
+    linear_pattern: "Linear Pattern",
+    circular_pattern: "Circular Pattern",
+    mirror: "Mirror",
+  };
+  const title = displayNames[activeOperation.type] ??
+    activeOperation.type.charAt(0).toUpperCase() + activeOperation.type.slice(1);
 
   return (
     <div className="flex h-full flex-col bg-[var(--cad-bg-panel-alt)] border-r border-[var(--cad-border)]">
@@ -38,10 +56,13 @@ export function PropertyManager() {
 
       {/* Operation-specific panel */}
       <div className="flex-1 overflow-y-auto p-3">
-        {activeOperation.type === "extrude" && <ExtrudePanel />}
-        {activeOperation.type === "revolve" && (
-          <p className="text-xs text-[var(--cad-text-muted)]">Revolve parameters coming soon</p>
-        )}
+        {(activeOperation.type === "extrude" || activeOperation.type === "cut_extrude") && <ExtrudePanel />}
+        {(activeOperation.type === "revolve" || activeOperation.type === "cut_revolve") && <RevolvePanel />}
+        {activeOperation.type === "fillet" && <FilletPanel />}
+        {activeOperation.type === "chamfer" && <ChamferPanel />}
+        {activeOperation.type === "linear_pattern" && <LinearPatternPanel />}
+        {activeOperation.type === "circular_pattern" && <CircularPatternPanel />}
+        {activeOperation.type === "mirror" && <MirrorPanel />}
       </div>
     </div>
   );

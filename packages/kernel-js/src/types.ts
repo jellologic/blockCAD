@@ -7,9 +7,14 @@ export type Point3 = [number, number, number];
 export type ClientFeatureKind =
   | "sketch"
   | "extrude"
+  | "cut_extrude"
   | "revolve"
+  | "cut_revolve"
   | "fillet"
-  | "chamfer";
+  | "chamfer"
+  | "linear_pattern"
+  | "circular_pattern"
+  | "mirror";
 
 // Server-only feature kinds
 export type ServerFeatureKind =
@@ -19,10 +24,7 @@ export type ServerFeatureKind =
   | "sweep"
   | "loft"
   | "shell"
-  | "draft"
-  | "linear_pattern"
-  | "circular_pattern"
-  | "mirror";
+  | "draft";
 
 export type FeatureKind = ClientFeatureKind | ServerFeatureKind;
 
@@ -31,12 +33,35 @@ export interface ExtrudeParams {
   depth: number;
   symmetric: boolean;
   draft_angle: number;
+  end_condition?: "blind" | "through_all" | "up_to_next" | "up_to_surface" | "offset_from_surface" | "up_to_vertex";
+  direction2_enabled?: boolean;
+  depth2?: number;
+  draft_angle2?: number;
+  end_condition2?: "blind" | "through_all" | "up_to_next" | "up_to_surface" | "offset_from_surface" | "up_to_vertex";
+  target_face_index?: number;
+  surface_offset?: number;
+  target_vertex_position?: [number, number, number];
+  flip_side_to_cut?: boolean;
+  cap_ends?: boolean;
+  from_offset?: number;
+  thin_feature?: boolean;
+  thin_wall_thickness?: number;
+  from_condition?: "sketch_plane" | "offset" | "surface" | "vertex";
+  from_face_index?: number;
+  from_vertex_position?: [number, number, number];
+  contour_index?: number;
 }
 
 export interface RevolveParams {
   axis_origin: Point3;
   axis_direction: Vec3;
   angle: number;
+  direction2_enabled?: boolean;
+  angle2?: number;
+  symmetric?: boolean;
+  thin_feature?: boolean;
+  thin_wall_thickness?: number;
+  flip_side_to_cut?: boolean;
 }
 
 export interface FilletParams {
@@ -48,6 +73,27 @@ export interface ChamferParams {
   edge_indices: number[];
   distance: number;
   distance2?: number;
+}
+
+export interface LinearPatternParams {
+  direction: Vec3;
+  spacing: number;
+  count: number;
+  direction2?: Vec3;
+  spacing2?: number;
+  count2?: number;
+}
+
+export interface CircularPatternParams {
+  axis_origin: Point3;
+  axis_direction: Vec3;
+  count: number;
+  total_angle: number;
+}
+
+export interface MirrorParams {
+  plane_origin: Point3;
+  plane_normal: Vec3;
 }
 
 // --- Sketch 2D types ---
@@ -111,9 +157,14 @@ export type FeatureParams =
   | { type: "placeholder" }
   | { type: "sketch"; params: SketchFeatureData }
   | { type: "extrude"; params: ExtrudeParams }
+  | { type: "cut_extrude"; params: ExtrudeParams }
   | { type: "revolve"; params: RevolveParams }
+  | { type: "cut_revolve"; params: RevolveParams }
   | { type: "fillet"; params: FilletParams }
   | { type: "chamfer"; params: ChamferParams }
+  | { type: "linear_pattern"; params: LinearPatternParams }
+  | { type: "circular_pattern"; params: CircularPatternParams }
+  | { type: "mirror"; params: MirrorParams }
   // Server-only params stored as opaque JSON
   | { type: ServerFeatureKind; params: Record<string, unknown> };
 

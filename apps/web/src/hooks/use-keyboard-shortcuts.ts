@@ -17,9 +17,10 @@ export function useKeyboardShortcuts() {
   const setMode = useEditorStore((s) => s.setMode);
   const mode = useEditorStore((s) => s.mode);
   const rebuild = useEditorStore((s) => s.rebuild);
-  const enterSketchMode = useEditorStore((s) => s.enterSketchMode);
+  const startSketchFlow = useEditorStore((s) => s.startSketchFlow);
   const exitSketchMode = useEditorStore((s) => s.exitSketchMode);
   const setSketchTool = useEditorStore((s) => s.setSketchTool);
+  const clearPendingPoints = useEditorStore((s) => s.clearPendingPoints);
   const sketchSession = useEditorStore((s) => s.sketchSession);
 
   useEffect(() => {
@@ -32,10 +33,19 @@ export function useKeyboardShortcuts() {
         case "Escape":
           if (mode === "sketch") {
             if (sketchSession?.activeTool) {
+              // Level 1: Deactivate current tool, clear pending chain
               setSketchTool(null);
+              clearPendingPoints();
+            } else if (sketchSession && sketchSession.entities.length > 0) {
+              // Level 2: Entities exist, no tool active → save and exit (like SolidWorks)
+              exitSketchMode(true);
             } else {
+              // Level 3: Empty sketch → just cancel
               exitSketchMode(false);
             }
+            e.preventDefault();
+          } else if (mode === "select-plane") {
+            setMode("view");
             e.preventDefault();
           } else if (activeOperation) {
             cancelOperation();
@@ -61,7 +71,7 @@ export function useKeyboardShortcuts() {
         case "s":
         case "S":
           if (mode !== "sketch" && !activeOperation && !e.ctrlKey && !e.metaKey) {
-            enterSketchMode("front");
+            startSketchFlow();
             e.preventDefault();
           }
           break;
@@ -106,10 +116,34 @@ export function useKeyboardShortcuts() {
           }
           break;
 
+        case "m":
+        case "M":
+          if (mode === "sketch" && !e.ctrlKey && !e.metaKey) {
+            setSketchTool("measure");
+            e.preventDefault();
+          }
+          break;
+
         case "e":
         case "E":
           if (!activeOperation && mode !== "sketch" && !e.ctrlKey && !e.metaKey) {
             startOperation("extrude");
+            e.preventDefault();
+          }
+          break;
+
+        case "x":
+        case "X":
+          if (!activeOperation && mode !== "sketch" && !e.ctrlKey && !e.metaKey) {
+            startOperation("cut_extrude");
+            e.preventDefault();
+          }
+          break;
+
+        case "v":
+        case "V":
+          if (!activeOperation && mode !== "sketch" && !e.ctrlKey && !e.metaKey) {
+            startOperation("revolve");
             e.preventDefault();
           }
           break;
@@ -130,6 +164,72 @@ export function useKeyboardShortcuts() {
           }
           break;
 
+        case "g":
+        case "G":
+          if (!activeOperation && mode !== "sketch" && !e.ctrlKey && !e.metaKey) {
+            startOperation("fillet");
+            e.preventDefault();
+          }
+          break;
+
+        case "h":
+        case "H":
+          if (!activeOperation && mode !== "sketch" && !e.ctrlKey && !e.metaKey) {
+            startOperation("chamfer");
+            e.preventDefault();
+          }
+          break;
+
+        case "z":
+        case "Z":
+          if (mode === "sketch" && (e.ctrlKey || e.metaKey) && !e.shiftKey) {
+            useEditorStore.getState().undoSketch();
+            e.preventDefault();
+          } else if (mode === "sketch" && (e.ctrlKey || e.metaKey) && e.shiftKey) {
+            useEditorStore.getState().redoSketch();
+            e.preventDefault();
+          }
+          break;
+
+        case "y":
+        case "Y":
+          if (mode === "sketch" && (e.ctrlKey || e.metaKey)) {
+            useEditorStore.getState().redoSketch();
+            e.preventDefault();
+          }
+          break;
+
+        case "1":
+          if (!activeOperation && mode !== "sketch") {
+            useEditorStore.getState().setCameraTarget([0, 0, 30]); // Front
+            e.preventDefault();
+          }
+          break;
+        case "3":
+          if (!activeOperation && mode !== "sketch") {
+            useEditorStore.getState().setCameraTarget([30, 0, 0]); // Right
+            e.preventDefault();
+          }
+          break;
+        case "5":
+          if (!activeOperation && mode !== "sketch") {
+            useEditorStore.getState().setCameraTarget([0, 30, 0]); // Top
+            e.preventDefault();
+          }
+          break;
+        case "0":
+          if (!activeOperation && mode !== "sketch") {
+            useEditorStore.getState().setCameraTarget([20, 15, 20]); // Isometric
+            e.preventDefault();
+          }
+          break;
+        case ".":
+          if (!activeOperation && mode !== "sketch") {
+            useEditorStore.getState().fitAll();
+            e.preventDefault();
+          }
+          break;
+
         case "F5":
           rebuild();
           e.preventDefault();
@@ -137,7 +237,7 @@ export function useKeyboardShortcuts() {
 
         case "Delete":
         case "Backspace":
-          // Placeholder for delete selected feature
+          // Delete is handled by sketch overlay via selected entity IDs
           break;
       }
     }
@@ -148,8 +248,9 @@ export function useKeyboardShortcuts() {
     activeOperation,
     cancelOperation,
     confirmOperation,
-    enterSketchMode,
+    startSketchFlow,
     exitSketchMode,
+    clearPendingPoints,
     mode,
     rebuild,
     selectFace,
