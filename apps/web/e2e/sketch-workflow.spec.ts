@@ -1,20 +1,12 @@
 import { test, expect } from "@playwright/test";
-import { waitForEditor } from "./helpers";
+import { waitForEditor, enterSketchMode } from "./helpers";
 
 test.describe("Sketch workflow", () => {
-  test("opens plane selector and enters sketch mode", async ({ page }) => {
+  test("enters sketch mode and shows tools", async ({ page }) => {
     await waitForEditor(page);
 
-    // Click Sketch button in ribbon
-    await page.locator('[data-testid="ribbon-sketch"]').click();
-
-    // Plane selector should appear
-    await expect(page.locator('[data-testid="plane-front"]')).toBeVisible({
-      timeout: 5000,
-    });
-
-    // Select Front Plane
-    await page.locator('[data-testid="plane-front"]').click();
+    // Enter sketch mode programmatically (plane selection requires 3D click)
+    await enterSketchMode(page, "front");
 
     // Should be in sketch mode — confirm/cancel visible
     await expect(
@@ -28,55 +20,37 @@ test.describe("Sketch workflow", () => {
 
   test("confirm sketch adds feature to tree", async ({ page }) => {
     await waitForEditor(page);
-
-    // Enter sketch mode
-    await page.locator('[data-testid="ribbon-sketch"]').click();
-    await page.locator('[data-testid="plane-front"]').click();
-    await expect(
-      page.locator('[data-testid="sketch-confirm"]')
-    ).toBeVisible({ timeout: 10000 });
+    await enterSketchMode(page, "front");
 
     // Confirm the sketch
     await page.locator('[data-testid="sketch-confirm"]').click();
 
-    // Should return to view mode — feature count increased
+    // Should return to view mode — feature count increased by 1
     await expect(page.locator('[data-testid="feature-count"]')).toContainText(
-      "3 features"
+      "1 feature"
     );
   });
 
   test("cancel sketch does not add feature", async ({ page }) => {
     await waitForEditor(page);
-
-    // Enter sketch mode
-    await page.locator('[data-testid="ribbon-sketch"]').click();
-    await page.locator('[data-testid="plane-front"]').click();
-    await expect(
-      page.locator('[data-testid="sketch-cancel"]')
-    ).toBeVisible({ timeout: 10000 });
+    await enterSketchMode(page, "front");
 
     // Cancel the sketch
     await page.locator('[data-testid="sketch-cancel"]').click();
 
-    // Feature count should still be 2
+    // Feature count should still be 0 (no sketch added)
     await expect(page.locator('[data-testid="feature-count"]')).toContainText(
-      "2 features"
+      "0 features"
     );
   });
 
   test("sketch mode shows property panel info", async ({ page }) => {
     await waitForEditor(page);
-
-    // Enter sketch mode
-    await page.locator('[data-testid="ribbon-sketch"]').click();
-    await page.locator('[data-testid="plane-front"]').click();
-    await expect(
-      page.locator('[data-testid="sketch-confirm"]')
-    ).toBeVisible({ timeout: 10000 });
+    await enterSketchMode(page, "front");
 
     // Property panel should show sketch info
     await expect(page.getByText("Front Plane")).toBeVisible();
     await expect(page.getByText("0 points")).toBeVisible();
-    await expect(page.getByText("Not Constrained")).toBeVisible();
+    await expect(page.getByText("Empty")).toBeVisible();
   });
 });

@@ -790,6 +790,25 @@ mod tests {
     }
 
     #[test]
+    fn test_duplicate_constraint_builds_graph() {
+        // Adding the same constraint twice should not panic
+        let mut sketch = Sketch::new(Plane::xy(0.0));
+        let p1 = sketch.add_entity(SketchEntity::Point { position: Pt2::new(0.0, 0.0) });
+        let p2 = sketch.add_entity(SketchEntity::Point { position: Pt2::new(10.0, 0.5) });
+        let line = sketch.add_entity(SketchEntity::Line { start: p1, end: p2 });
+
+        // Add horizontal constraint TWICE (over-constrained but shouldn't panic)
+        sketch.add_constraint(Constraint::new(ConstraintKind::Horizontal, vec![line]));
+        sketch.add_constraint(Constraint::new(ConstraintKind::Horizontal, vec![line]));
+
+        let result = build_constraint_graph(&sketch);
+        assert!(result.is_ok(), "Duplicate constraints should not cause build_constraint_graph to fail");
+        let (graph, _) = result.unwrap();
+        // Should have 2 equations (one per horizontal constraint)
+        assert_eq!(graph.equation_count(), 2);
+    }
+
+    #[test]
     fn test_point_on_line_constraint() {
         // A line and a separate point. PointOnCurve should place the point on the line.
         let mut sketch = Sketch::new(Plane::xy(0.0));

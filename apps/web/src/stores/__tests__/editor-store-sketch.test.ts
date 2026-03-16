@@ -294,3 +294,258 @@ describe("editor store - delete and undo/redo", () => {
     expect(useEditorStore.getState().sketchSession!.entities).toHaveLength(0);
   });
 });
+
+describe("editor store - sketch feature pipeline", () => {
+  beforeEach(async () => {
+    useEditorStore.setState({
+      kernel: null, meshData: null, features: [], isLoading: true, error: null,
+      mode: "view", selectedFeatureId: null, selectedFaceIndex: null,
+      hoveredFaceIndex: null, wireframe: false, showEdges: true,
+      activeOperation: null, sketchSession: null, sketchSolver: null, sketchDofStatus: null,
+    });
+    await useEditorStore.getState().initKernel();
+  });
+
+  it("exitSketchMode(true) saves entities and constraints in feature params", () => {
+    useEditorStore.getState().enterSketchMode("front");
+    const store = useEditorStore.getState();
+
+    // Add entities
+    store.addSketchEntity({ type: "point", id: "se-0", position: { x: 0, y: 0 } });
+    store.addSketchEntity({ type: "point", id: "se-1", position: { x: 10, y: 0 } });
+    store.addSketchEntity({ type: "line", id: "se-2", startId: "se-0", endId: "se-1" });
+
+    // Add constraint
+    store.addSketchConstraint({ id: "sc-0", kind: "horizontal", entityIds: ["se-2"] });
+
+    // Confirm sketch
+    useEditorStore.getState().exitSketchMode(true);
+
+    // Verify feature was created with correct data
+    const features = useEditorStore.getState().features;
+    const sketchFeature = features.find(f => f.type === "sketch");
+    expect(sketchFeature).toBeDefined();
+
+    // Feature params should contain the sketch data
+    const params = sketchFeature!.params as any;
+    expect(params.type).toBe("sketch");
+    expect(params.params.entities).toHaveLength(3); // 2 points + 1 line
+    expect(params.params.constraints).toHaveLength(1);
+    expect(params.params.constraints[0].kind).toBe("horizontal");
+    expect(params.params.plane).toBeDefined();
+  });
+
+  it("exitSketchMode(true) includes plane data in feature", () => {
+    useEditorStore.getState().enterSketchMode("top");
+    const store = useEditorStore.getState();
+    store.addSketchEntity({ type: "point", id: "se-0", position: { x: 0, y: 0 } });
+
+    useEditorStore.getState().exitSketchMode(true);
+
+    const features = useEditorStore.getState().features;
+    const sketchFeature = features.find(f => f.type === "sketch");
+    const params = sketchFeature!.params as any;
+    // Top plane has normal [0,1,0]
+    expect(params.params.plane.normal).toEqual([0, 1, 0]);
+  });
+});
+
+describe("editor store - constraint edge cases", () => {
+  beforeEach(async () => {
+    useEditorStore.setState({
+      kernel: null, meshData: null, features: [], isLoading: true, error: null,
+      mode: "view", selectedFeatureId: null, selectedFaceIndex: null,
+      hoveredFaceIndex: null, wireframe: false, showEdges: true,
+      activeOperation: null, sketchSession: null, sketchSolver: null, sketchDofStatus: null,
+    });
+    await useEditorStore.getState().initKernel();
+    useEditorStore.getState().enterSketchMode("front");
+  });
+
+  it("adding duplicate constraint does not crash", () => {
+    const store = useEditorStore.getState();
+    store.addSketchEntity({ type: "point", id: "se-0", position: { x: 0, y: 0 } });
+    store.addSketchEntity({ type: "point", id: "se-1", position: { x: 10, y: 0 } });
+    store.addSketchEntity({ type: "line", id: "se-2", startId: "se-0", endId: "se-1" });
+
+    // Add horizontal twice — should not crash
+    store.addSketchConstraint({ id: "sc-0", kind: "horizontal", entityIds: ["se-2"] });
+    store.addSketchConstraint({ id: "sc-1", kind: "horizontal", entityIds: ["se-2"] });
+
+    expect(useEditorStore.getState().sketchSession!.constraints).toHaveLength(2);
+  });
+
+  it("deleting point cascades to remove line and its constraints", () => {
+    const store = useEditorStore.getState();
+    store.addSketchEntity({ type: "point", id: "se-0", position: { x: 0, y: 0 } });
+    store.addSketchEntity({ type: "point", id: "se-1", position: { x: 10, y: 0 } });
+    store.addSketchEntity({ type: "line", id: "se-2", startId: "se-0", endId: "se-1" });
+    store.addSketchConstraint({ id: "sc-0", kind: "horizontal", entityIds: ["se-2"] });
+
+    // Delete the line directly to test constraint cascading
+    store.deleteSelectedEntities(["se-2"]);
+
+    const session = useEditorStore.getState().sketchSession!;
+    // Line should be gone
+    expect(session.entities.find(e => e.id === "se-2")).toBeUndefined();
+    // Constraint referencing the line should also be gone
+    expect(session.constraints).toHaveLength(0);
+  });
+
+  it("large coordinate sketch entities work", () => {
+    const store = useEditorStore.getState();
+    store.addSketchEntity({ type: "point", id: "se-0", position: { x: 1e5, y: 1e5 } });
+
+    const session = useEditorStore.getState().sketchSession!;
+    const pt = session.entities.find(e => e.id === "se-0");
+    expect(pt).toBeDefined();
+    if (pt?.type === "point") {
+      expect(pt.position.x).toBe(1e5);
+      expect(pt.position.y).toBe(1e5);
+    }
+  });
+
+  it("zero-length line does not crash", () => {
+    const store = useEditorStore.getState();
+    // Two coincident points forming a zero-length line
+    store.addSketchEntity({ type: "point", id: "se-0", position: { x: 5, y: 5 } });
+    store.addSketchEntity({ type: "point", id: "se-1", position: { x: 5, y: 5 } });
+    store.addSketchEntity({ type: "line", id: "se-2", startId: "se-0", endId: "se-1" });
+
+    const session = useEditorStore.getState().sketchSession!;
+    expect(session.entities).toHaveLength(3);
+  });
+
+  it("many constraints on same entities does not crash", () => {
+    const store = useEditorStore.getState();
+    store.addSketchEntity({ type: "point", id: "se-0", position: { x: 0, y: 0 } });
+    store.addSketchEntity({ type: "point", id: "se-1", position: { x: 10, y: 0 } });
+    store.addSketchEntity({ type: "line", id: "se-2", startId: "se-0", endId: "se-1" });
+
+    // Add 5 constraints on the same line
+    store.addSketchConstraint({ id: "sc-0", kind: "horizontal", entityIds: ["se-2"] });
+    store.addSketchConstraint({ id: "sc-1", kind: "horizontal", entityIds: ["se-2"] });
+    store.addSketchConstraint({ id: "sc-2", kind: "horizontal", entityIds: ["se-2"] });
+    store.addSketchConstraint({ id: "sc-3", kind: "fixed", entityIds: ["se-0"] });
+    store.addSketchConstraint({ id: "sc-4", kind: "fixed", entityIds: ["se-1"] });
+
+    expect(useEditorStore.getState().sketchSession!.constraints).toHaveLength(5);
+  });
+
+  it("rapid entity additions work correctly", () => {
+    const store = useEditorStore.getState();
+    // Simulate rapid user drawing
+    for (let i = 0; i < 20; i++) {
+      store.addSketchEntity({ type: "point", id: `se-${i}`, position: { x: i, y: i } });
+    }
+    expect(useEditorStore.getState().sketchSession!.entities).toHaveLength(20);
+  });
+});
+
+describe("editor store - solver integration", () => {
+  beforeEach(async () => {
+    useEditorStore.setState({
+      kernel: null, meshData: null, features: [], isLoading: true, error: null,
+      mode: "view", selectedFeatureId: null, selectedFaceIndex: null,
+      hoveredFaceIndex: null, wireframe: false, showEdges: true,
+      activeOperation: null, sketchSession: null, sketchSolver: null, sketchDofStatus: null,
+    });
+    await useEditorStore.getState().initKernel();
+    useEditorStore.getState().enterSketchMode("front");
+  });
+
+  it("horizontal constraint moves point to same y-coordinate", () => {
+    const store = useEditorStore.getState();
+    // Create a line that's not quite horizontal
+    store.addSketchEntity({ type: "point", id: "se-0", position: { x: 0, y: 0 } });
+    store.addSketchEntity({ type: "point", id: "se-1", position: { x: 10, y: 3 } }); // y=3, not horizontal
+    store.addSketchEntity({ type: "line", id: "se-2", startId: "se-0", endId: "se-1" });
+
+    // Add horizontal constraint — solver should make both y-coords equal
+    store.addSketchConstraint({ id: "sc-0", kind: "horizontal", entityIds: ["se-2"] });
+
+    const session = useEditorStore.getState().sketchSession!;
+    const p0 = session.entities.find(e => e.id === "se-0");
+    const p1 = session.entities.find(e => e.id === "se-1");
+
+    if (p0?.type === "point" && p1?.type === "point") {
+      // After solving, both y-coordinates should be close to equal
+      expect(Math.abs(p0.position.y - p1.position.y)).toBeLessThan(1);
+    }
+  });
+
+  it("fixed + distance constraint produces correct positions", () => {
+    const store = useEditorStore.getState();
+    store.addSketchEntity({ type: "point", id: "se-0", position: { x: 0, y: 0 } });
+    store.addSketchEntity({ type: "point", id: "se-1", position: { x: 8, y: 0.5 } });
+    store.addSketchEntity({ type: "line", id: "se-2", startId: "se-0", endId: "se-1" });
+
+    // Fix first point
+    store.addSketchConstraint({ id: "sc-0", kind: "fixed", entityIds: ["se-0"] });
+    // Make line horizontal
+    store.addSketchConstraint({ id: "sc-1", kind: "horizontal", entityIds: ["se-2"] });
+    // Set distance to 10
+    store.addSketchConstraint({ id: "sc-2", kind: "distance", entityIds: ["se-0", "se-1"], value: 10 });
+
+    const session = useEditorStore.getState().sketchSession!;
+    const p0 = session.entities.find(e => e.id === "se-0");
+    const p1 = session.entities.find(e => e.id === "se-1");
+
+    if (p0?.type === "point" && p1?.type === "point") {
+      // p0 should be at origin (fixed)
+      expect(Math.abs(p0.position.x)).toBeLessThan(0.1);
+      expect(Math.abs(p0.position.y)).toBeLessThan(0.1);
+      // p1 should be at (10, 0) — horizontal, distance 10
+      expect(Math.abs(p1.position.x - 10)).toBeLessThan(1);
+      expect(Math.abs(p1.position.y)).toBeLessThan(1);
+    }
+  });
+
+  it("DOF status updates after adding constraints", () => {
+    const store = useEditorStore.getState();
+    store.addSketchEntity({ type: "point", id: "se-0", position: { x: 0, y: 0 } });
+    store.addSketchEntity({ type: "point", id: "se-1", position: { x: 10, y: 0 } });
+    store.addSketchEntity({ type: "line", id: "se-2", startId: "se-0", endId: "se-1" });
+
+    // Adding a constraint should trigger solveSketch which sets DOF status
+    store.addSketchConstraint({ id: "sc-0", kind: "horizontal", entityIds: ["se-2"] });
+
+    // DOF status should be set (non-null) after adding a constraint
+    const dof = useEditorStore.getState().sketchDofStatus;
+    // It should be under_constrained (line is horizontal but not fully determined)
+    // The actual value depends on solver behavior, so just verify it's set
+    expect(dof).not.toBeNull();
+  });
+
+  it("solver handles multiple constraints building up", () => {
+    const store = useEditorStore.getState();
+    // Build a constrained right angle: 2 lines sharing a point
+    store.addSketchEntity({ type: "point", id: "se-0", position: { x: 0, y: 0 } });
+    store.addSketchEntity({ type: "point", id: "se-1", position: { x: 10, y: 0.5 } });
+    store.addSketchEntity({ type: "point", id: "se-2", position: { x: 0.5, y: 8 } });
+    store.addSketchEntity({ type: "line", id: "se-3", startId: "se-0", endId: "se-1" });
+    store.addSketchEntity({ type: "line", id: "se-4", startId: "se-0", endId: "se-2" });
+
+    // Add constraints one by one — each triggers solver
+    store.addSketchConstraint({ id: "sc-0", kind: "fixed", entityIds: ["se-0"] });
+    store.addSketchConstraint({ id: "sc-1", kind: "horizontal", entityIds: ["se-3"] });
+    store.addSketchConstraint({ id: "sc-2", kind: "vertical", entityIds: ["se-4"] });
+
+    const session = useEditorStore.getState().sketchSession!;
+    // After all constraints: se-0 at (0,0), se-1 on x-axis, se-2 on y-axis
+    const p1 = session.entities.find(e => e.id === "se-1");
+    const p2 = session.entities.find(e => e.id === "se-2");
+
+    if (p1?.type === "point") {
+      expect(Math.abs(p1.position.y)).toBeLessThan(1); // horizontal
+    }
+    if (p2?.type === "point") {
+      expect(Math.abs(p2.position.x)).toBeLessThan(1); // vertical
+    }
+
+    // All 5 entities should still be present
+    expect(session.entities).toHaveLength(5);
+    // All 3 constraints should be present
+    expect(session.constraints).toHaveLength(3);
+  });
+});

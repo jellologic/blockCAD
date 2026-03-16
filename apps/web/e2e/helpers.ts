@@ -3,20 +3,28 @@ import { type Page, expect } from "@playwright/test";
 /** Navigate to the editor and wait for the kernel to fully load */
 export async function waitForEditor(page: Page) {
   await page.goto("/editor");
-  // Wait for hydration + kernel init — feature count will go from "0" to "2"
-  await expect(page.locator('[data-testid="feature-count"]')).toContainText(
-    "2 features",
-    { timeout: 20000 }
-  );
+  // Wait for hydration + kernel init — feature count element becomes visible
+  await expect(page.locator('[data-testid="feature-count"]')).toBeVisible({
+    timeout: 20000,
+  });
+  // Wait for kernel to be initialized
+  await page.waitForFunction(() => {
+    const store = (window as any).__editorStore;
+    return store && store.getState().kernel !== null;
+  }, { timeout: 20000 });
 }
 
-/** Enter sketch mode on the given plane */
+/** Enter sketch mode on the given plane (programmatically, since plane selection requires 3D viewport click) */
 export async function enterSketchMode(
   page: Page,
   plane: "front" | "top" | "right" = "front"
 ) {
-  await page.locator('[data-testid="ribbon-sketch"]').click();
-  await page.locator(`[data-testid="plane-${plane}"]`).click();
+  await page.evaluate((p) => {
+    const store = (window as any).__editorStore;
+    if (store) {
+      store.getState().enterSketchMode(p);
+    }
+  }, plane);
   await expect(
     page.locator('[data-testid="sketch-confirm"]')
   ).toBeVisible({ timeout: 10000 });

@@ -126,3 +126,83 @@ fn sketch_with_arc_and_line_profile_extraction() {
     // Line contributes 1 start point, arc contributes 1 start + several intermediate
     assert!(profile.points.len() > 2, "D-shape should have arc samples, got {}", profile.points.len());
 }
+
+#[test]
+fn sketch_serialization_roundtrip_all_constraints() {
+    // Create a sketch with every constraint type, serialize to JSON, deserialize, verify
+    let mut sketch = Sketch::new(Plane::xy(0.0));
+
+    let p0 = sketch.add_entity(SketchEntity::Point { position: Pt2::new(0.0, 0.0) });
+    let p1 = sketch.add_entity(SketchEntity::Point { position: Pt2::new(10.0, 0.0) });
+    let p2 = sketch.add_entity(SketchEntity::Point { position: Pt2::new(10.0, 5.0) });
+    let p3 = sketch.add_entity(SketchEntity::Point { position: Pt2::new(0.0, 5.0) });
+    let p4 = sketch.add_entity(SketchEntity::Point { position: Pt2::new(5.0, 2.5) }); // midpoint
+
+    let line1 = sketch.add_entity(SketchEntity::Line { start: p0, end: p1 });
+    let line2 = sketch.add_entity(SketchEntity::Line { start: p1, end: p2 });
+    let line3 = sketch.add_entity(SketchEntity::Line { start: p2, end: p3 });
+
+    let center = sketch.add_entity(SketchEntity::Point { position: Pt2::new(5.0, 5.0) });
+    let circle1 = sketch.add_entity(SketchEntity::Circle { center, radius: 3.0 });
+    let circle2 = sketch.add_entity(SketchEntity::Circle { center, radius: 3.0 });
+
+    // Add one of each constraint type
+    sketch.add_constraint(Constraint::new(ConstraintKind::Fixed, vec![p0]));
+    sketch.add_constraint(Constraint::new(ConstraintKind::Horizontal, vec![line1]));
+    sketch.add_constraint(Constraint::new(ConstraintKind::Vertical, vec![line2]));
+    sketch.add_constraint(Constraint::new(ConstraintKind::Distance { value: 10.0 }, vec![p0, p1]));
+    sketch.add_constraint(Constraint::new(ConstraintKind::Parallel, vec![line1, line3]));
+    sketch.add_constraint(Constraint::new(ConstraintKind::Perpendicular, vec![line1, line2]));
+    sketch.add_constraint(Constraint::new(ConstraintKind::Equal, vec![line1, line3]));
+    sketch.add_constraint(Constraint::new(ConstraintKind::Coincident, vec![p0, p3]));
+    sketch.add_constraint(Constraint::new(ConstraintKind::Midpoint, vec![p0, p1, p4]));
+    sketch.add_constraint(Constraint::new(ConstraintKind::Radius { value: 3.0 }, vec![circle1]));
+    sketch.add_constraint(Constraint::new(ConstraintKind::Coradial, vec![circle1, circle2]));
+    sketch.add_constraint(Constraint::new(ConstraintKind::PointOnCurve, vec![p4, line1]));
+    sketch.add_constraint(Constraint::new(ConstraintKind::Tangent, vec![line1, circle1]));
+    sketch.add_constraint(Constraint::new(
+        ConstraintKind::Angle { value: std::f64::consts::FRAC_PI_2, supplementary: false },
+        vec![line1, line2],
+    ));
+
+    // Serialize
+    let json = serde_json::to_string(&sketch).expect("Sketch should serialize");
+
+    // Deserialize
+    let restored: Sketch = serde_json::from_str(&json).expect("Sketch should deserialize");
+
+    assert_eq!(restored.entity_count(), sketch.entity_count());
+    assert_eq!(restored.constraint_count(), sketch.constraint_count());
+    assert_eq!(restored.constraint_count(), 14); // all 14 constraints
+}
+
+#[test]
+fn sketch_with_blocks_serializes() {
+    use blockcad_kernel::sketch::block::{SketchBlock, SketchBlockInstance};
+
+    let mut sketch = Sketch::new(Plane::xy(0.0));
+    let p0 = sketch.add_entity(SketchEntity::Point { position: Pt2::new(0.0, 0.0) });
+    let p1 = sketch.add_entity(SketchEntity::Point { position: Pt2::new(5.0, 0.0) });
+
+    sketch.add_block(SketchBlock {
+        id: "b-1".into(),
+        name: "TestBlock".into(),
+        insertion_point: Pt2::new(0.0, 0.0),
+        entity_indices: vec![p0, p1],
+    });
+    sketch.add_block_instance(SketchBlockInstance {
+        id: "bi-1".into(),
+        block_id: "b-1".into(),
+        position: Pt2::new(10.0, 0.0),
+        scale: 2.0,
+        rotation: 0.5,
+    });
+
+    let json = serde_json::to_string(&sketch).expect("Sketch with blocks should serialize");
+    let restored: Sketch = serde_json::from_str(&json).expect("Should deserialize");
+
+    assert_eq!(restored.block_definitions.len(), 1);
+    assert_eq!(restored.block_instances.len(), 1);
+    assert_eq!(restored.block_definitions[0].name, "TestBlock");
+    assert!((restored.block_instances[0].scale - 2.0).abs() < 1e-9);
+}

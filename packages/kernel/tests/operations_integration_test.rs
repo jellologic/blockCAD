@@ -261,3 +261,21 @@ fn e2e_circle_sketch_extrude_tessellate() {
     assert!(mesh.triangle_count() > 0, "Mesh should have triangles");
     assert!(mesh.vertex_count() > 0, "Mesh should have vertices");
 }
+
+#[test]
+fn e2e_extrude_large_depth() {
+    let mut tree = build_sketch_extrude_tree(1000.0);
+    let brep = evaluate(&mut tree).unwrap();
+    assert!(matches!(brep.body, Body::Solid(_)));
+    let mesh = tessellate_brep(&brep, &TessellationParams::default()).unwrap();
+    mesh.validate().unwrap();
+    assert!(mesh.triangle_count() > 0);
+}
+
+#[test]
+fn e2e_extrude_zero_depth_fails() {
+    let mut tree = build_sketch_extrude_tree(0.0);
+    let result = evaluate(&mut tree);
+    // Should fail because depth is 0
+    assert!(result.is_err(), "Zero depth extrude should fail");
+}

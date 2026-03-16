@@ -299,4 +299,90 @@ mod tests {
         assert!(result.converged);
         assert_eq!(result.iterations, 0);
     }
+
+    #[test]
+    fn solver_converges_for_large_system() {
+        // Stress test: a chain of 10 points along a line, each pair connected
+        // by a horizontal constraint and a distance constraint. This creates
+        // a large system (~20 equations) that exercises the solver at scale.
+        let mut graph = ConstraintGraph::new();
+
+        // 10 points: first fixed at origin, each subsequent ~10 units right
+        let mut xs = Vec::new();
+        let mut ys = Vec::new();
+        for i in 0..10 {
+            let x = graph.variables.add(Variable::new(i as f64 * 9.5 + 0.5)); // slightly off
+            let y = graph.variables.add(Variable::new(0.3 * (i as f64))); // slightly off horizontal
+            if i == 0 {
+                // Fix origin
+                graph.add_equation(Box::new(FixedEquation::new(x, 0.0)));
+                graph.add_equation(Box::new(FixedEquation::new(y, 0.0)));
+            }
+            xs.push(x);
+            ys.push(y);
+        }
+
+        // Chain constraints: horizontal (y_i == y_{i+1}) and distance = 10
+        for i in 0..9 {
+            graph.add_equation(Box::new(CoincidentEquation::new(ys[i], ys[i + 1])));
+            graph.add_equation(Box::new(DistanceEquation::new(xs[i], ys[i], xs[i + 1], ys[i + 1], 10.0)));
+        }
+
+        // 2 (fixed) + 9 (horiz) + 9 (dist) = 20 equations
+        assert_eq!(graph.equation_count(), 20, "Should have 20 equations");
+
+        let result = solve(&mut graph, &SolverConfig::default()).unwrap();
+        assert!(result.converged, "Solver should converge for chain of 10 points (iterations={})", result.iterations);
+
+        // Verify: all y should be 0, x[i] should be i*10
+        for i in 0..10 {
+            let xi = graph.variables.value(xs[i]);
+            let yi = graph.variables.value(ys[i]);
+            assert!((xi - i as f64 * 10.0).abs() < 1e-6, "x[{}] = {}, expected {}", i, xi, i as f64 * 10.0);
+            assert!(yi.abs() < 1e-6, "y[{}] = {}, expected 0", i, yi);
+        }
+    }
+
+    #[test]
+    fn solver_handles_large_coordinates() {
+        // Rectangle at (1e5, 1e5) scale
+        use crate::sketch::constraint::{Constraint, ConstraintKind};
+        use crate::sketch::entity::SketchEntity;
+        use crate::sketch::sketch::Sketch;
+        use crate::sketch::solver_bridge::build_constraint_graph;
+        use crate::geometry::surface::plane::Plane;
+        use crate::geometry::Pt2;
+
+        let offset = 1e5;
+        let mut sketch = Sketch::new(Plane::xy(0.0));
+
+        let p0 = sketch.add_entity(SketchEntity::Point { position: Pt2::new(offset, offset) });
+        let p1 = sketch.add_entity(SketchEntity::Point { position: Pt2::new(offset + 8.0, offset + 0.5) });
+        let p2 = sketch.add_entity(SketchEntity::Point { position: Pt2::new(offset + 8.0, offset + 4.0) });
+        let p3 = sketch.add_entity(SketchEntity::Point { position: Pt2::new(offset + 0.5, offset + 4.0) });
+
+        let bottom = sketch.add_entity(SketchEntity::Line { start: p0, end: p1 });
+        let right = sketch.add_entity(SketchEntity::Line { start: p1, end: p2 });
+        let top = sketch.add_entity(SketchEntity::Line { start: p2, end: p3 });
+        let left = sketch.add_entity(SketchEntity::Line { start: p3, end: p0 });
+
+        sketch.add_constraint(Constraint::new(ConstraintKind::Fixed, vec![p0]));
+        sketch.add_constraint(Constraint::new(ConstraintKind::Horizontal, vec![bottom]));
+        sketch.add_constraint(Constraint::new(ConstraintKind::Horizontal, vec![top]));
+        sketch.add_constraint(Constraint::new(ConstraintKind::Vertical, vec![right]));
+        sketch.add_constraint(Constraint::new(ConstraintKind::Vertical, vec![left]));
+        sketch.add_constraint(Constraint::new(ConstraintKind::Distance { value: 10.0 }, vec![p0, p1]));
+        sketch.add_constraint(Constraint::new(ConstraintKind::Distance { value: 5.0 }, vec![p1, p2]));
+
+        let (mut graph, var_map) = build_constraint_graph(&sketch).unwrap();
+        let result = solve(&mut graph, &SolverConfig::default()).unwrap();
+        assert!(result.converged, "Solver should converge at large coords");
+
+        // Verify positions
+        let (x0, y0) = var_map.point_vars(p0).unwrap();
+        assert!((graph.variables.value(x0) - offset).abs() < 1e-4);
+        assert!((graph.variables.value(y0) - offset).abs() < 1e-4);
+        let (x1, _) = var_map.point_vars(p1).unwrap();
+        assert!((graph.variables.value(x1) - (offset + 10.0)).abs() < 1e-4);
+    }
 }

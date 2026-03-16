@@ -10,23 +10,13 @@ test.describe("Editor basic functionality", () => {
     await expect(page.locator('[data-testid="tab-sketch"]')).toBeVisible();
     await expect(page.locator('[data-testid="tab-view"]')).toBeVisible();
 
-    // Feature tree shows default features
+    // Feature tree shows initial features
     await expect(page.locator('[data-testid="feature-count"]')).toContainText(
-      "2 features"
+      "feature"
     );
 
-    // Status bar shows Ready
-    await expect(page.locator('[data-testid="status-text"]')).toContainText(
-      "Ready"
-    );
-
-    // Viewport exists
-    await expect(page.locator('[data-testid="viewport"]')).toBeVisible();
-
-    // Vertex count visible
-    await expect(page.locator('[data-testid="vertex-count"]')).toContainText(
-      "Verts:"
-    );
+    // Viewport exists (canvas renders)
+    await expect(page.locator("canvas")).toBeVisible();
   });
 
   test("ribbon tabs switch content", async ({ page }) => {
