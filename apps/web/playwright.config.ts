@@ -6,6 +6,7 @@ export default defineConfig({
   testDir: "./e2e",
   timeout: 30000,
   retries: 0,
+  workers: 1,
   use: {
     baseURL: `http://localhost:${TEST_PORT}`,
     headless: false,
