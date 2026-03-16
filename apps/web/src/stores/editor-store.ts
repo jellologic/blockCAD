@@ -21,6 +21,18 @@ import { toast } from "sonner";
 
 type EditorMode = "view" | "sketch" | "select-face" | "select-edge" | "select-plane";
 
+function downloadFile(data: Uint8Array | string, filename: string, mimeType: string) {
+  const blob = typeof data === "string"
+    ? new Blob([data], { type: mimeType })
+    : new Blob([new ArrayBuffer(data.byteLength)].map((buf) => { new Uint8Array(buf).set(data); return buf; }), { type: mimeType });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 type SketchToolId = "line" | "circle" | "rectangle" | "arc" | "dimension" | "measure" | null;
 
 type DofStatus = "fully_constrained" | "under_constrained" | "over_constrained" | null;
@@ -173,6 +185,12 @@ interface EditorState {
   endUndoBatch: () => void;
   deleteSelectedEntities: (entityIds: string[]) => void;
   setMeasureResult: (result: MeasureResult | null) => void;
+
+  // Export actions
+  exportSTL: (binary?: boolean) => void;
+  exportOBJ: () => void;
+  export3MF: () => void;
+  exportGLB: () => void;
 }
 
 function getPlane(planeId: SketchPlaneId): SketchPlane {
@@ -925,5 +943,58 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     set({
       sketchSession: { ...sketchSession, measureResult: result },
     });
+  },
+
+  exportSTL: (binary = true) => {
+    const { kernel } = get();
+    if (!kernel) { toast.error("No model loaded"); return; }
+    try {
+      if (binary) {
+        const bytes = kernel.exportSTLBinary();
+        downloadFile(bytes, "model.stl", "application/sla");
+      } else {
+        const text = kernel.exportSTLAscii({});
+        downloadFile(text, "model.stl", "text/plain");
+      }
+      toast.success("STL exported");
+    } catch (err) {
+      toast.error("Export failed: " + (err instanceof Error ? err.message : String(err)));
+    }
+  },
+
+  exportOBJ: () => {
+    const { kernel } = get();
+    if (!kernel) { toast.error("No model loaded"); return; }
+    try {
+      const text = kernel.exportOBJ({});
+      downloadFile(text, "model.obj", "text/plain");
+      toast.success("OBJ exported");
+    } catch (err) {
+      toast.error("Export failed: " + (err instanceof Error ? err.message : String(err)));
+    }
+  },
+
+  export3MF: () => {
+    const { kernel } = get();
+    if (!kernel) { toast.error("No model loaded"); return; }
+    try {
+      const bytes = kernel.export3MF({});
+      downloadFile(bytes, "model.3mf", "application/vnd.ms-package.3dmanufacturing-3dmodel+xml");
+      toast.success("3MF exported");
+    } catch (err) {
+      toast.error("Export failed: " + (err instanceof Error ? err.message : String(err)));
+    }
+  },
+
+  exportGLB: () => {
+    const { kernel } = get();
+    if (!kernel) { toast.error("No model loaded"); return; }
+    try {
+      const bytes = kernel.exportGLB({});
+      downloadFile(bytes, "model.glb", "model/gltf-binary");
+      toast.success("GLB exported");
+    } catch (err) {
+      toast.error("Export failed: " + (err instanceof Error ? err.message : String(err)));
+    }
   },
 }));

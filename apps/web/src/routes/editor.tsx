@@ -20,6 +20,11 @@ function EditorPage() {
     initKernel();
   }, [initKernel]);
 
+  // Expose store for e2e testing
+  useEffect(() => {
+    (window as any).__editorStore = useEditorStore;
+  }, []);
+
   if (error) {
     return (
       <div className="flex h-svh items-center justify-center bg-[var(--cad-bg-viewport)] text-[var(--cad-icon-error)]">

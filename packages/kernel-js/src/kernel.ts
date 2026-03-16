@@ -205,6 +205,55 @@ export class KernelClient {
     }
   }
 
+  exportSTLBinary(chordTolerance: number = 0.01, angleTolerance: number = 0.5): Uint8Array {
+    try {
+      const bytes = this.handle.export_stl_binary(chordTolerance, angleTolerance);
+      const buffer = new Uint8Array(bytes.byteLength);
+      buffer.set(bytes);
+      return buffer;
+    } catch (err) {
+      throw KernelError.fromWasm(String(err));
+    }
+  }
+
+  exportSTLAscii(options: { precision?: number } = {}, chordTolerance: number = 0.01, angleTolerance: number = 0.5): string {
+    try {
+      return this.handle.export_stl_ascii(chordTolerance, angleTolerance, JSON.stringify(options));
+    } catch (err) {
+      throw KernelError.fromWasm(String(err));
+    }
+  }
+
+  exportOBJ(options: { precision?: number } = {}, chordTolerance: number = 0.01, angleTolerance: number = 0.5): string {
+    try {
+      return this.handle.export_obj(chordTolerance, angleTolerance, JSON.stringify(options));
+    } catch (err) {
+      throw KernelError.fromWasm(String(err));
+    }
+  }
+
+  export3MF(options: { unit?: string; vertex_colors?: boolean } = {}, chordTolerance: number = 0.01, angleTolerance: number = 0.5): Uint8Array {
+    try {
+      const bytes = this.handle.export_3mf(chordTolerance, angleTolerance, JSON.stringify(options));
+      const buffer = new Uint8Array(bytes.byteLength);
+      buffer.set(bytes);
+      return buffer;
+    } catch (err) {
+      throw KernelError.fromWasm(String(err));
+    }
+  }
+
+  exportGLB(options: { quantize?: boolean } = {}, chordTolerance: number = 0.01, angleTolerance: number = 0.5): Uint8Array {
+    try {
+      const bytes = this.handle.export_glb(chordTolerance, angleTolerance, JSON.stringify(options));
+      const buffer = new Uint8Array(bytes.byteLength);
+      buffer.set(bytes);
+      return buffer;
+    } catch (err) {
+      throw KernelError.fromWasm(String(err));
+    }
+  }
+
   static deserialize(json: string): KernelClient {
     const client = new KernelClient();
     // Free the default handle, replace with deserialized one

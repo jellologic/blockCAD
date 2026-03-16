@@ -50,3 +50,9 @@ export async function startExtrude(page: Page) {
 export async function confirmOperation(page: Page) {
   await page.locator('[data-testid="operation-confirm"]').click();
 }
+
+/** Switch to the View tab where export buttons live */
+export async function navigateToViewTab(page: Page) {
+  await page.click('[data-testid="tab-view"]');
+  await expect(page.locator('[data-testid="export-stl"]')).toBeVisible();
+}

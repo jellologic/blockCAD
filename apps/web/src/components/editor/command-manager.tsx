@@ -3,6 +3,7 @@ import {
   Box, RotateCw, Circle, Octagon, Grid3x3, RefreshCw, FlipHorizontal2,
   Minus, Square, Lock, MoveHorizontal, MoveVertical, Ruler, Spline,
   Eye, Layers, Network, Maximize2, BoxSelect, Pencil, Check, X, RulerIcon,
+  Download,
 } from "lucide-react";
 import { RibbonButton } from "./ribbon-button";
 import { useEditorStore } from "@/stores/editor-store";
@@ -66,6 +67,11 @@ export function CommandManager() {
   const setCameraTarget = useEditorStore((s) => s.setCameraTarget);
   const fitAll = useEditorStore((s) => s.fitAll);
   const applyConstraint = useEditorStore((s) => s.applyConstraint);
+  const exportSTL = useEditorStore((s) => s.exportSTL);
+  const exportOBJ = useEditorStore((s) => s.exportOBJ);
+  const export3MF = useEditorStore((s) => s.export3MF);
+  const exportGLB = useEditorStore((s) => s.exportGLB);
+  const hasMesh = useEditorStore((s) => s.meshData !== null);
 
   // Auto-switch ribbon tab based on mode
   useEffect(() => {
@@ -246,6 +252,14 @@ export function CommandManager() {
                   <RibbonButton icon={Square} label="Front" size="small" onClick={() => setCameraTarget([0, 0, 30])} />
                   <RibbonButton icon={Box} label="Isometric" size="small" onClick={() => setCameraTarget([20, 15, 20])} />
                   <RibbonButton icon={Maximize2} label="Fit All" size="small" onClick={fitAll} />
+                </div>
+              </RibbonGroup>
+              <RibbonGroup label="Export">
+                <div className="flex flex-col gap-0.5">
+                  <RibbonButton icon={Download} label="STL" size="small" testId="export-stl" disabled={!hasMesh} onClick={() => exportSTL(true)} />
+                  <RibbonButton icon={Download} label="OBJ" size="small" testId="export-obj" disabled={!hasMesh} onClick={exportOBJ} />
+                  <RibbonButton icon={Download} label="3MF" size="small" testId="export-3mf" disabled={!hasMesh} onClick={export3MF} />
+                  <RibbonButton icon={Download} label="GLB" size="small" testId="export-glb" disabled={!hasMesh} onClick={exportGLB} />
                 </div>
               </RibbonGroup>
               <InteractionStyleToggle />

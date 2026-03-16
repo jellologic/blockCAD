@@ -14,6 +14,8 @@ pub struct TriMesh {
     pub indices: Vec<u32>,
     /// Face ID that generated each triangle (for selection/highlight)
     pub face_ids: Vec<u32>,
+    /// Optional per-vertex RGBA colors: [r0, g0, b0, a0, r1, ...] (0.0–1.0). Empty if unused.
+    pub colors: Vec<f32>,
 }
 
 impl TriMesh {
@@ -40,6 +42,7 @@ impl TriMesh {
         self.indices
             .extend(other.indices.iter().map(|i| i + offset));
         self.face_ids.extend_from_slice(&other.face_ids);
+        self.colors.extend_from_slice(&other.colors);
     }
 
     /// Validate mesh integrity
@@ -71,6 +74,14 @@ impl TriMesh {
                     idx, vc
                 )));
             }
+        }
+        // Colors must be empty or match vertex count × 4
+        if !self.colors.is_empty() && self.colors.len() != self.vertex_count() * 4 {
+            return Err(KernelError::Internal(format!(
+                "Color array length {} does not match vertex count × 4 = {}",
+                self.colors.len(),
+                self.vertex_count() * 4
+            )));
         }
         // Check for degenerate triangles
         for tri in self.indices.chunks(3) {
@@ -134,6 +145,7 @@ mod tests {
             uvs: vec![0.0, 0.0, 1.0, 0.0, 0.0, 1.0],
             indices: vec![0, 1, 2],
             face_ids: vec![0],
+            colors: vec![],
         }
     }
 
@@ -153,6 +165,7 @@ mod tests {
             uvs: vec![0.0; 6],
             indices: vec![0, 0, 1], // degenerate
             face_ids: vec![0],
+            colors: vec![],
         };
         assert!(mesh.validate().is_err());
     }

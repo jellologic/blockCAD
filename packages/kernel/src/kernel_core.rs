@@ -67,6 +67,21 @@ impl KernelCore {
         Ok(id)
     }
 
+    /// Build a tessellated mesh from the current model state.
+    fn build_mesh(
+        &mut self,
+        chord_tolerance: f64,
+        angle_tolerance: f64,
+    ) -> KernelResult<crate::tessellation::mesh::TriMesh> {
+        let brep = evaluate(&mut self.tree)?;
+        let params = TessellationParams {
+            chord_tolerance,
+            angle_tolerance,
+            ..TessellationParams::default()
+        };
+        tessellate_brep(&brep, &params)
+    }
+
     /// Tessellate the current model state.
     /// Returns the mesh as a byte buffer.
     pub fn tessellate(
@@ -74,14 +89,66 @@ impl KernelCore {
         chord_tolerance: f64,
         angle_tolerance: f64,
     ) -> KernelResult<Vec<u8>> {
-        let brep = evaluate(&mut self.tree)?;
-        let params = TessellationParams {
-            chord_tolerance,
-            angle_tolerance,
-            ..TessellationParams::default()
-        };
-        let mesh = tessellate_brep(&brep, &params)?;
+        let mesh = self.build_mesh(chord_tolerance, angle_tolerance)?;
         Ok(mesh.to_bytes())
+    }
+
+    /// Export as binary STL bytes.
+    pub fn export_stl_binary(
+        &mut self,
+        chord_tolerance: f64,
+        angle_tolerance: f64,
+    ) -> KernelResult<Vec<u8>> {
+        let mesh = self.build_mesh(chord_tolerance, angle_tolerance)?;
+        Ok(crate::export::stl::export_stl_binary(&mesh))
+    }
+
+    /// Export as ASCII STL string.
+    pub fn export_stl_ascii(
+        &mut self,
+        chord_tolerance: f64,
+        angle_tolerance: f64,
+        options_json: &str,
+    ) -> KernelResult<String> {
+        let options: crate::export::StlOptions = serde_json::from_str(options_json).unwrap_or_default();
+        let mesh = self.build_mesh(chord_tolerance, angle_tolerance)?;
+        Ok(crate::export::stl::export_stl_ascii(&mesh, &self.name, &options))
+    }
+
+    /// Export as Wavefront OBJ string.
+    pub fn export_obj(
+        &mut self,
+        chord_tolerance: f64,
+        angle_tolerance: f64,
+        options_json: &str,
+    ) -> KernelResult<String> {
+        let options: crate::export::ObjOptions = serde_json::from_str(options_json).unwrap_or_default();
+        let mesh = self.build_mesh(chord_tolerance, angle_tolerance)?;
+        Ok(crate::export::obj::export_obj(&mesh, &self.name, &options))
+    }
+
+    /// Export as 3MF bytes (ZIP archive).
+    pub fn export_3mf(
+        &mut self,
+        chord_tolerance: f64,
+        angle_tolerance: f64,
+        options_json: &str,
+    ) -> KernelResult<Vec<u8>> {
+        let options: crate::export::ThreeMfOptions = serde_json::from_str(options_json).unwrap_or_default();
+        let mesh = self.build_mesh(chord_tolerance, angle_tolerance)?;
+        crate::export::threemf::export_3mf(&mesh, &self.name, &options)
+    }
+
+    /// Export as GLB (binary glTF 2.0) bytes.
+    pub fn export_glb(
+        &mut self,
+        chord_tolerance: f64,
+        angle_tolerance: f64,
+        options_json: &str,
+    ) -> KernelResult<Vec<u8>> {
+        let options: crate::export::GlbOptions = serde_json::from_str(options_json).unwrap_or_default();
+        let mesh = self.build_mesh(chord_tolerance, angle_tolerance)?;
+        crate::export::gltf::export_glb(&mesh, &self.name, &options)
     }
 
     /// Get the feature list as JSON.
@@ -243,5 +310,61 @@ mod tests {
         let mut core = KernelCore::new();
         let result = core.add_feature("not_a_feature", "{}");
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_export_stl_binary() {
+        let mut core = KernelCore::new();
+        core.add_feature("sketch", &make_sketch_json()).unwrap();
+        core.add_feature("extrude", &make_extrude_json(7.0)).unwrap();
+        let bytes = core.export_stl_binary(0.01, 0.5).unwrap();
+        assert!(bytes.len() > 84);
+        let tc = u32::from_le_bytes([bytes[80], bytes[81], bytes[82], bytes[83]]);
+        assert_eq!(tc, 12); // Box: 6 faces × 2 tris = 12
+        assert_eq!(bytes.len(), 84 + 50 * tc as usize);
+    }
+
+    #[test]
+    fn test_export_stl_ascii() {
+        let mut core = KernelCore::new();
+        core.add_feature("sketch", &make_sketch_json()).unwrap();
+        core.add_feature("extrude", &make_extrude_json(7.0)).unwrap();
+        let text = core.export_stl_ascii(0.01, 0.5, "{}").unwrap();
+        assert!(text.starts_with("solid"));
+        assert!(text.contains("endsolid"));
+        assert_eq!(text.matches("facet normal").count(), 12);
+    }
+
+    #[test]
+    fn test_export_obj() {
+        let mut core = KernelCore::new();
+        core.add_feature("sketch", &make_sketch_json()).unwrap();
+        core.add_feature("extrude", &make_extrude_json(7.0)).unwrap();
+        let text = core.export_obj(0.01, 0.5, "{}").unwrap();
+        assert!(text.contains("v "));
+        assert!(text.contains("vn "));
+        assert!(text.contains("f "));
+    }
+
+    #[test]
+    fn test_export_3mf() {
+        let mut core = KernelCore::new();
+        core.add_feature("sketch", &make_sketch_json()).unwrap();
+        core.add_feature("extrude", &make_extrude_json(7.0)).unwrap();
+        let bytes = core.export_3mf(0.01, 0.5, "{}").unwrap();
+        assert_eq!(bytes[0], b'P');
+        assert_eq!(bytes[1], b'K');
+    }
+
+    #[test]
+    fn test_export_glb() {
+        let mut core = KernelCore::new();
+        core.add_feature("sketch", &make_sketch_json()).unwrap();
+        core.add_feature("extrude", &make_extrude_json(7.0)).unwrap();
+        let bytes = core.export_glb(0.01, 0.5, "{}").unwrap();
+        let magic = u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
+        assert_eq!(magic, 0x46546C67);
+        let version = u32::from_le_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]);
+        assert_eq!(version, 2);
     }
 }

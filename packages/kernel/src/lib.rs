@@ -9,6 +9,7 @@ pub mod operations;
 pub mod feature_tree;
 pub mod tessellation;
 pub mod serialization;
+pub mod export;
 pub mod kernel_core;
 
 #[cfg(feature = "wasm")]
