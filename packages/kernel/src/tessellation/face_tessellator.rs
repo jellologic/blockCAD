@@ -58,14 +58,54 @@ pub fn tessellate_face(
         })
         .collect::<KernelResult<Vec<_>>>()?;
 
+    // Collect inner loop vertices
+    let mut inner_loops_3d: Vec<Vec<crate::geometry::Pt3>> = Vec::new();
+    let mut inner_loops_2d: Vec<Vec<[f64; 2]>> = Vec::new();
+
+    for &inner_loop_id in &face.inner_loops {
+        let inner_loop = brep.loops.get(inner_loop_id)?;
+        let mut inner_verts_3d: Vec<crate::geometry::Pt3> = Vec::new();
+        for &coedge_id in &inner_loop.coedges {
+            let coedge = brep.coedges.get(coedge_id)?;
+            let edge = brep.edges.get(coedge.edge)?;
+            let start_vid = match coedge.orientation {
+                crate::topology::edge::Orientation::Forward => edge.start,
+                crate::topology::edge::Orientation::Reversed => edge.end,
+            };
+            let vertex = brep.vertices.get(start_vid)?;
+            inner_verts_3d.push(vertex.point);
+        }
+        let inner_verts_2d: Vec<[f64; 2]> = inner_verts_3d
+            .iter()
+            .map(|p| surface.closest_parameters(p, 1e-9).map(|(u, v)| [u, v]))
+            .collect::<KernelResult<Vec<_>>>()?;
+        inner_loops_3d.push(inner_verts_3d);
+        inner_loops_2d.push(inner_verts_2d);
+    }
+
     // Triangulate in 2D
-    let triangles = ear_clip::triangulate(&vertices_2d);
+    let triangles = if inner_loops_2d.is_empty() {
+        ear_clip::triangulate(&vertices_2d)
+    } else {
+        ear_clip::triangulate_with_holes(&vertices_2d, &inner_loops_2d)
+    };
+
+    // Build combined vertex arrays (outer + inner loops)
+    let mut all_verts_3d = vertices_3d.clone();
+    for inner in &inner_loops_3d {
+        all_verts_3d.extend_from_slice(inner);
+    }
+
+    let mut all_verts_2d = vertices_2d.clone();
+    for inner in &inner_loops_2d {
+        all_verts_2d.extend_from_slice(inner);
+    }
 
     // Build TriMesh
     let mut mesh = TriMesh::new();
 
     // Add all vertices
-    for p in &vertices_3d {
+    for p in &all_verts_3d {
         mesh.positions.push(p.x as f32);
         mesh.positions.push(p.y as f32);
         mesh.positions.push(p.z as f32);
@@ -74,7 +114,7 @@ pub fn tessellate_face(
         mesh.normals.push(normal.z as f32);
     }
     // UVs from 2D projection
-    for uv in &vertices_2d {
+    for uv in &all_verts_2d {
         mesh.uvs.push(uv[0] as f32);
         mesh.uvs.push(uv[1] as f32);
     }

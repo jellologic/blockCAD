@@ -61,12 +61,10 @@ fn feature_params_adjacently_tagged() {
     use blockcad_kernel::geometry::Vec3;
     use blockcad_kernel::operations::extrude::ExtrudeParams;
 
-    let params = FeatureParams::Extrude(ExtrudeParams {
-        direction: Vec3::new(0.0, 0.0, 1.0),
-        depth: 10.0,
-        symmetric: false,
-        draft_angle: 0.0,
-    });
+    let params = FeatureParams::Extrude(ExtrudeParams::blind(
+        Vec3::new(0.0, 0.0, 1.0),
+        10.0,
+    ));
 
     let json = serde_json::to_string(&params).unwrap();
     // Verify adjacently-tagged format
@@ -92,12 +90,10 @@ fn json_golden_format() {
             "extrude-1".into(),
             "Base Extrude".into(),
             FeatureKind::Extrude,
-            FeatureParams::Extrude(ExtrudeParams {
-                direction: Vec3::new(0.0, 0.0, 1.0),
-                depth: 25.0,
-                symmetric: false,
-                draft_angle: 0.0,
-            }),
+            FeatureParams::Extrude(ExtrudeParams::blind(
+                Vec3::new(0.0, 0.0, 1.0),
+                25.0,
+            )),
         )],
     );
 

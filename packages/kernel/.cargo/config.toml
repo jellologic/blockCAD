@@ -1,3 +1,2 @@
-[build]
-# Default target for convenience; cargo test overrides to native automatically
-# target = "wasm32-unknown-unknown"
+[target.wasm32-unknown-unknown]
+rustflags = ["-C", "link-args=-z stack-size=5242880"]

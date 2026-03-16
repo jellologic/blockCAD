@@ -1,6 +1,6 @@
 //! Utility functions for constructing B-Rep topology from geometric data.
 
-use crate::error::KernelResult;
+use crate::error::{KernelError, KernelResult};
 use crate::geometry::curve::line::Line3;
 use crate::geometry::surface::plane::Plane;
 use crate::geometry::{Pt3, Vec3};
@@ -64,6 +64,113 @@ pub fn make_planar_face(brep: &mut BRep, points: &[Pt3], plane: Plane) -> Kernel
     // Create face
     let face = Face::new().with_surface(surf_idx).with_outer_loop(loop_id);
     Ok(brep.faces.insert(face))
+}
+
+/// Add an inner loop to an existing face using the given polygon points.
+pub fn add_inner_loop_to_face(
+    brep: &mut BRep,
+    face_id: super::face::FaceId,
+    points: &[Pt3],
+) -> KernelResult<()> {
+    let n = points.len();
+
+    // Create vertices
+    let vert_ids: Vec<_> = points
+        .iter()
+        .map(|p| brep.vertices.insert(Vertex::new(*p)))
+        .collect();
+
+    // Create edges
+    let mut edge_ids = Vec::with_capacity(n);
+    for i in 0..n {
+        let j = (i + 1) % n;
+        let line = Line3::new(points[i], points[j])?;
+        let curve_idx = brep.add_curve(Box::new(line));
+        let edge = Edge::new(vert_ids[i], vert_ids[j]).with_curve(curve_idx);
+        edge_ids.push(brep.edges.insert(edge));
+    }
+
+    // Create coedges (reversed orientation for inner loop — CW winding)
+    let mut coedge_ids = Vec::with_capacity(n);
+    for &edge_id in edge_ids.iter().rev() {
+        let coedge = CoEdge::new(edge_id, Orientation::Reversed);
+        coedge_ids.push(brep.coedges.insert(coedge));
+    }
+
+    // Link coedges
+    for i in 0..n {
+        let next = coedge_ids[(i + 1) % n];
+        let prev = coedge_ids[(i + n - 1) % n];
+        if let Ok(ce) = brep.coedges.get_mut(coedge_ids[i]) {
+            ce.next = Some(next);
+            ce.prev = Some(prev);
+        }
+    }
+
+    let inner_loop_id = brep.loops.insert(Loop::new(coedge_ids));
+
+    // Add inner loop to face
+    let face = brep.faces.get_mut(face_id)?;
+    face.inner_loops.push(inner_loop_id);
+
+    Ok(())
+}
+
+/// Extract all face polygons from a BRep as (vertex_positions, face_normal) pairs.
+/// This enables rebuilding faces after geometric transformation.
+pub fn extract_face_polygons(brep: &BRep) -> KernelResult<Vec<(Vec<Pt3>, Vec3)>> {
+    let mut polygons = Vec::new();
+
+    for (_, face) in brep.faces.iter() {
+        let loop_id = face.outer_loop.ok_or_else(|| KernelError::Topology("Face has no outer loop".into()))?;
+        let loop_ = brep.loops.get(loop_id)?;
+
+        let surf_idx = face.surface_index.ok_or_else(|| KernelError::Topology("Face has no surface".into()))?;
+        let normal = brep.surfaces[surf_idx].normal_at(0.0, 0.0)?;
+
+        let mut points = Vec::new();
+        for &coedge_id in &loop_.coedges {
+            let coedge = brep.coedges.get(coedge_id)?;
+            let edge = brep.edges.get(coedge.edge)?;
+            let start_vid = match coedge.orientation {
+                Orientation::Forward => edge.start,
+                Orientation::Reversed => edge.end,
+            };
+            let vertex = brep.vertices.get(start_vid)?;
+            points.push(vertex.point);
+        }
+
+        polygons.push((points, normal));
+    }
+
+    Ok(polygons)
+}
+
+/// Rebuild a BRep from a list of face polygons (vertex positions + normals).
+pub fn rebuild_brep_from_faces(faces: &[(Vec<Pt3>, Vec3)]) -> KernelResult<BRep> {
+    let mut brep = BRep::new();
+
+    for (points, normal) in faces {
+        if points.len() < 3 { continue; }
+        let u_axis = (points[1] - points[0]).normalize();
+        let v_axis = normal.cross(&u_axis).normalize();
+        let plane = Plane {
+            origin: points[0],
+            normal: *normal,
+            u_axis,
+            v_axis,
+        };
+        make_planar_face(&mut brep, points, plane)?;
+    }
+
+    let face_ids: Vec<_> = brep.faces.iter().map(|(id, _)| id).collect();
+    if !face_ids.is_empty() {
+        let shell_id = brep.shells.insert(Shell::new(face_ids, true));
+        let solid_id = brep.solids.insert(Solid::new(vec![shell_id]));
+        brep.body = Body::Solid(solid_id);
+    }
+
+    Ok(brep)
 }
 
 /// Build a box (rectangular prism) BRep from width, height, depth on the XY plane.

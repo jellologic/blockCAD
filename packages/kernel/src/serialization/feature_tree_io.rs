@@ -66,10 +66,10 @@ mod tests {
         tree.push(Feature::new(
             "extrude-1".into(), "Extrude".into(),
             FeatureKind::Extrude,
-            FeatureParams::Extrude(crate::operations::extrude::ExtrudeParams {
-                direction: crate::geometry::Vec3::new(0.0, 0.0, 1.0),
-                depth: 5.0, symmetric: false, draft_angle: 0.0,
-            }),
+            FeatureParams::Extrude(crate::operations::extrude::ExtrudeParams::blind(
+                crate::geometry::Vec3::new(0.0, 0.0, 1.0),
+                5.0,
+            )),
         ));
 
         // Serialize

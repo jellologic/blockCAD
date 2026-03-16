@@ -13,8 +13,8 @@ pub struct KernelHandle {
 impl KernelHandle {
     #[wasm_bindgen(constructor)]
     pub fn new() -> KernelHandle {
-        #[cfg(feature = "wasm")]
-        console_error_panic_hook::set_once();
+        // Note: console_error_panic_hook removed to avoid re-entrant JS calls
+        // that cause "recursive use of an object" errors in wasm-bindgen
         KernelHandle {
             core: KernelCore::new(),
         }
@@ -37,6 +37,8 @@ impl KernelHandle {
 
     /// Check if a feature kind is available in this build.
     pub fn is_feature_available(&self, kind: &str) -> bool {
+        // LinearPattern, CircularPattern, and Mirror are now client operations
+        // and are always available. Only boolean/sweep/loft/shell/draft remain server-only.
         let _server_only = [
             "boolean_union",
             "boolean_subtract",
@@ -45,9 +47,6 @@ impl KernelHandle {
             "loft",
             "shell",
             "draft",
-            "linear_pattern",
-            "circular_pattern",
-            "mirror",
         ];
         #[cfg(feature = "server")]
         return true;

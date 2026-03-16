@@ -59,8 +59,10 @@ impl KernelCore {
             }
         }
 
-        // Evaluate to catch errors early
-        evaluate(&mut self.tree)?;
+        // Evaluate to catch errors early (skip for sketch-only — sketches don't produce geometry alone)
+        if kind != FeatureKind::Sketch {
+            evaluate(&mut self.tree)?;
+        }
 
         Ok(id)
     }
@@ -172,12 +174,10 @@ mod tests {
     }
 
     fn make_extrude_json(depth: f64) -> String {
-        let params = FeatureParams::Extrude(crate::operations::extrude::ExtrudeParams {
-            direction: Vec3::new(0.0, 0.0, 1.0),
+        let params = FeatureParams::Extrude(crate::operations::extrude::ExtrudeParams::blind(
+            Vec3::new(0.0, 0.0, 1.0),
             depth,
-            symmetric: false,
-            draft_angle: 0.0,
-        });
+        ));
         serde_json::to_string(&params).unwrap()
     }
 

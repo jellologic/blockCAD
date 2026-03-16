@@ -1,3 +1,4 @@
+pub mod adjacency;
 pub mod body;
 pub mod brep;
 pub mod builders;

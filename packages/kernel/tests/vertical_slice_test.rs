@@ -82,7 +82,10 @@ fn full_pipeline_sketch_extrude_tessellate() {
         plane: Plane::xy(0.0),
     };
     let depth = 7.0;
-    let brep = extrude_profile(&profile, Vec3::new(0.0, 0.0, 1.0), depth).unwrap();
+    let brep = extrude_profile(&profile, &ExtrudeParams::blind(
+        Vec3::new(0.0, 0.0, 1.0),
+        depth,
+    )).unwrap();
 
     // Verify topology: box has 6 faces
     assert_eq!(brep.faces.len(), 6, "Extruded box should have 6 faces");
@@ -111,12 +114,10 @@ fn full_pipeline_sketch_extrude_tessellate() {
         "extrude-1".into(),
         "Extrude Base".into(),
         FeatureKind::Extrude,
-        FeatureParams::Extrude(ExtrudeParams {
-            direction: Vec3::new(0.0, 0.0, 1.0),
+        FeatureParams::Extrude(ExtrudeParams::blind(
+            Vec3::new(0.0, 0.0, 1.0),
             depth,
-            symmetric: false,
-            draft_angle: 0.0,
-        }),
+        )),
     ));
 
     let doc = feature_tree_io::serialize_tree(&tree, "Vertical Slice Box").unwrap();

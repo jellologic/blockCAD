@@ -104,12 +104,10 @@ mod tests {
                     "extrude-1".into(),
                     "Extrude Base".into(),
                     FeatureKind::Extrude,
-                    FeatureParams::Extrude(ExtrudeParams {
-                        direction: Vec3::new(0.0, 0.0, 1.0),
-                        depth: 10.0,
-                        symmetric: false,
-                        draft_angle: 0.0,
-                    }),
+                    FeatureParams::Extrude(ExtrudeParams::blind(
+                        Vec3::new(0.0, 0.0, 1.0),
+                        10.0,
+                    )),
                 ),
                 Feature::new(
                     "fillet-1".into(),

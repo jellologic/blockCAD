@@ -6,12 +6,7 @@ use blockcad_kernel::topology::BRep;
 #[test]
 fn extrude_op_validates_params() {
     let op = ExtrudeOp;
-    let params = ExtrudeParams {
-        direction: Vec3::new(0.0, 0.0, 1.0),
-        depth: -1.0,
-        symmetric: false,
-        draft_angle: 0.0,
-    };
+    let params = ExtrudeParams::blind(Vec3::new(0.0, 0.0, 1.0), -1.0);
     let brep = BRep::new();
     let result = op.execute(&params, &brep);
     assert!(result.is_err());
