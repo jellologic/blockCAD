@@ -4,6 +4,7 @@ import {
   Minus, Square, Lock, MoveHorizontal, MoveVertical, Ruler, Spline,
   Eye, Layers, Network, Maximize2, BoxSelect, Pencil, Check, X, RulerIcon,
   Download, Plus, Link, FileText, Combine,
+  Scissors, ArrowUpRight, Copy, FlipHorizontal, Construction,
 } from "lucide-react";
 import { RibbonButton } from "./ribbon-button";
 import { useEditorStore } from "@/stores/editor-store";
@@ -230,6 +231,17 @@ export function CommandManager() {
                     testId="tool-measure"
                     onClick={() => setSketchTool("measure")}
                   />
+                </div>
+              </RibbonGroup>
+              <RibbonGroup label="Modify">
+                <div className="flex flex-col gap-0.5">
+                  <RibbonButton icon={Scissors} label="Trim" size="small" disabled={mode !== "sketch"} testId="tool-trim" active={sketchSession?.activeTool === "trim" as any} onClick={() => setSketchTool("trim" as any)} />
+                  <RibbonButton icon={ArrowUpRight} label="Extend" size="small" disabled={mode !== "sketch"} testId="tool-extend" active={sketchSession?.activeTool === "extend" as any} onClick={() => setSketchTool("extend" as any)} />
+                  <RibbonButton icon={Copy} label="Offset" size="small" disabled={mode !== "sketch"} testId="tool-offset" active={sketchSession?.activeTool === "offset" as any} onClick={() => setSketchTool("offset" as any)} />
+                </div>
+                <div className="flex flex-col gap-0.5">
+                  <RibbonButton icon={FlipHorizontal} label="Mirror" size="small" disabled={mode !== "sketch"} testId="tool-mirror" active={sketchSession?.activeTool === "mirror" as any} onClick={() => setSketchTool("mirror" as any)} />
+                  <RibbonButton icon={Construction} label="Constr." size="small" disabled={mode !== "sketch"} testId="tool-construction" onClick={() => {/* TODO: toggle construction on selected entity */}} />
                 </div>
               </RibbonGroup>
               {/* Confirm / Cancel — always visible in sketch mode */}

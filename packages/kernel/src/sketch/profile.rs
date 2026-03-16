@@ -17,10 +17,14 @@ pub fn extract_profile(
     var_map: &VariableMap,
     graph: &ConstraintGraph,
 ) -> KernelResult<ExtrudeProfile> {
-    // Collect all line entities with their start/end point IDs
+    // Collect all non-construction line entities with their start/end point IDs
     let mut lines = Vec::new();
-    for (_id, entity) in sketch.entities.iter() {
+    for (id, entity) in sketch.entities.iter() {
         if let SketchEntity::Line { start, end } = entity {
+            // Skip construction geometry — it doesn't form profile edges
+            if sketch.is_construction(id.index() as usize) {
+                continue;
+            }
             lines.push((*start, *end));
         }
     }

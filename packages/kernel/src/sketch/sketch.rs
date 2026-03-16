@@ -12,6 +12,9 @@ pub struct Sketch {
     pub plane: Plane,
     pub entities: EntityStore<SketchEntity>,
     pub constraints: EntityStore<Constraint>,
+    /// Entity indices marked as construction geometry (excluded from profile extraction).
+    #[serde(default)]
+    pub construction_entities: std::collections::HashSet<usize>,
 }
 
 impl Sketch {
@@ -20,7 +23,22 @@ impl Sketch {
             plane,
             entities: EntityStore::new(),
             constraints: EntityStore::new(),
+            construction_entities: std::collections::HashSet::new(),
         }
+    }
+
+    /// Mark an entity as construction geometry (won't form profile edges).
+    pub fn set_construction(&mut self, entity_index: usize, is_construction: bool) {
+        if is_construction {
+            self.construction_entities.insert(entity_index);
+        } else {
+            self.construction_entities.remove(&entity_index);
+        }
+    }
+
+    /// Check if an entity is construction geometry.
+    pub fn is_construction(&self, entity_index: usize) -> bool {
+        self.construction_entities.contains(&entity_index)
     }
 
     pub fn add_entity(&mut self, entity: SketchEntity) -> SketchEntityId {
