@@ -15,7 +15,7 @@ impl Operation for IntersectOp {
     fn execute(&self, _params: &Self::Params, _input: &BRep) -> KernelResult<BRep> {
         Err(KernelError::Operation {
             op: "boolean_intersect".into(),
-            detail: "Not yet implemented".into(),
+            detail: "Use csg_intersect() directly with both BReps".into(),
         })
     }
 

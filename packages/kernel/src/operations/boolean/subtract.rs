@@ -15,7 +15,7 @@ impl Operation for SubtractOp {
     fn execute(&self, _params: &Self::Params, _input: &BRep) -> KernelResult<BRep> {
         Err(KernelError::Operation {
             op: "boolean_subtract".into(),
-            detail: "Not yet implemented".into(),
+            detail: "Use csg_subtract() directly with both BReps".into(),
         })
     }
 

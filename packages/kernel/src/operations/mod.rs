@@ -8,9 +8,9 @@ pub mod chamfer;
 pub mod pattern;
 pub mod shell;
 
-// Server-only operations (computationally expensive)
-#[cfg(feature = "server")]
 pub mod boolean;
+
+// Server-only operations (computationally expensive)
 #[cfg(feature = "server")]
 pub mod sweep;
 #[cfg(feature = "server")]

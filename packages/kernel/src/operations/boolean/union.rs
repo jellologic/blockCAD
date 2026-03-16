@@ -1,11 +1,10 @@
-use crate::error::{KernelError, KernelResult};
+use crate::error::KernelResult;
 use crate::topology::BRep;
-
 use crate::operations::traits::Operation;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct UnionParams {
-    // The tool body will be provided via a separate mechanism (multi-body input)
+    // Tool BRep is provided separately via the evaluator
 }
 
 #[derive(Debug)]
@@ -15,9 +14,10 @@ impl Operation for UnionOp {
     type Params = UnionParams;
 
     fn execute(&self, _params: &Self::Params, _input: &BRep) -> KernelResult<BRep> {
-        Err(KernelError::Operation {
+        // Actual CSG is done in the evaluator which has both BReps
+        Err(crate::error::KernelError::Operation {
             op: "boolean_union".into(),
-            detail: "Not yet implemented".into(),
+            detail: "Use csg_union() directly with both BReps".into(),
         })
     }
 
