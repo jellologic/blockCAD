@@ -27,7 +27,7 @@ pub enum FeatureParams {
     BooleanIntersect(serde_json::Value),
     Sweep(serde_json::Value),
     Loft(serde_json::Value),
-    Shell(serde_json::Value),
+    Shell(crate::operations::shell::ShellParams),
     Draft(serde_json::Value),
     LinearPattern(crate::operations::pattern::linear::LinearPatternParams),
     CircularPattern(crate::operations::pattern::circular::CircularPatternParams),

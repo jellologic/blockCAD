@@ -474,6 +474,28 @@ pub fn evaluate(tree: &mut FeatureTree) -> KernelResult<BRep> {
                 tree.features_mut()[i].state = FeatureState::Evaluated;
             }
 
+            FeatureKind::Shell => {
+                let params = match &tree.features()[i].params {
+                    FeatureParams::Shell(p) => p.clone(),
+                    _ => {
+                        tree.features_mut()[i].state = FeatureState::Failed;
+                        return Err(KernelError::Operation {
+                            op: "evaluate".into(),
+                            detail: "Shell feature has wrong params type".into(),
+                        });
+                    }
+                };
+                if matches!(current_brep.body, Body::Empty) {
+                    tree.features_mut()[i].state = FeatureState::Failed;
+                    return Err(KernelError::Operation {
+                        op: "evaluate".into(),
+                        detail: "Cannot shell: no existing geometry".into(),
+                    });
+                }
+                current_brep = crate::operations::shell::shell_solid(&current_brep, &params)?;
+                tree.features_mut()[i].state = FeatureState::Evaluated;
+            }
+
             other => {
                 tree.features_mut()[i].state = FeatureState::Failed;
                 return Err(KernelError::Operation {

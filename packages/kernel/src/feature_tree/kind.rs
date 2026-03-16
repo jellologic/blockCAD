@@ -62,7 +62,6 @@ impl FeatureKind {
                 | FeatureKind::BooleanIntersect
                 | FeatureKind::Sweep
                 | FeatureKind::Loft
-                | FeatureKind::Shell
                 | FeatureKind::Draft
         )
     }
@@ -95,6 +94,7 @@ mod tests {
         assert!(!FeatureKind::LinearPattern.requires_server());
         assert!(!FeatureKind::CircularPattern.requires_server());
         assert!(!FeatureKind::Mirror.requires_server());
+        assert!(!FeatureKind::Shell.requires_server());
     }
 
     #[test]

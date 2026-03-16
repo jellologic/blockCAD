@@ -416,6 +416,10 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         plane_origin: [0, 0, 0],
         plane_normal: [1, 0, 0],
       },
+      shell: {
+        faces_to_remove: [],
+        thickness: 1,
+      },
     };
     set({ activeOperation: { type, params: defaultParams[type] || {} } });
   },
@@ -436,7 +440,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     if (!kernel || !activeOperation) return;
 
     // For extrude/cut_extrude/revolve/cut_revolve: use a fresh kernel to avoid WASM borrow conflicts
-    if (activeOperation.type === "extrude" || activeOperation.type === "cut_extrude" || activeOperation.type === "revolve" || activeOperation.type === "cut_revolve" || activeOperation.type === "fillet" || activeOperation.type === "chamfer" || activeOperation.type === "linear_pattern" || activeOperation.type === "circular_pattern" || activeOperation.type === "mirror") {
+    if (activeOperation.type === "extrude" || activeOperation.type === "cut_extrude" || activeOperation.type === "revolve" || activeOperation.type === "cut_revolve" || activeOperation.type === "fillet" || activeOperation.type === "chamfer" || activeOperation.type === "linear_pattern" || activeOperation.type === "circular_pattern" || activeOperation.type === "mirror" || activeOperation.type === "shell") {
       const hasSketch = localFeatures.some((f) => f.type === "sketch" && f.params.type === "sketch");
       if (!hasSketch) {
         toast.error(`Cannot ${activeOperation.type}: no sketch found. Draw a sketch first.`);
@@ -454,6 +458,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         linear_pattern: "Linear Pattern",
         circular_pattern: "Circular Pattern",
         mirror: "Mirror",
+        shell: "Shell",
       }[activeOperation.type] || "Feature";
 
       // Create a fresh KernelClient to avoid "recursive use" wasm-bindgen error

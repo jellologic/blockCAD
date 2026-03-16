@@ -6,6 +6,7 @@ pub mod revolve;
 pub mod fillet;
 pub mod chamfer;
 pub mod pattern;
+pub mod shell;
 
 // Server-only operations (computationally expensive)
 #[cfg(feature = "server")]
@@ -14,8 +15,6 @@ pub mod boolean;
 pub mod sweep;
 #[cfg(feature = "server")]
 pub mod loft;
-#[cfg(feature = "server")]
-pub mod shell;
 #[cfg(feature = "server")]
 pub mod draft;
 

@@ -128,6 +128,7 @@ export function CommandManager() {
                 <div className="flex flex-col gap-0.5">
                   <RibbonButton icon={Circle} label="Fillet" size="small" shortcut="G" onClick={() => startOperation("fillet")} />
                   <RibbonButton icon={Octagon} label="Chamfer" size="small" shortcut="H" onClick={() => startOperation("chamfer")} />
+                  <RibbonButton icon={Box} label="Shell" size="small" onClick={() => startOperation("shell")} />
                 </div>
               </RibbonGroup>
               <RibbonGroup label="Pattern">

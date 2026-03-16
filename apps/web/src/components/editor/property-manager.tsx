@@ -7,6 +7,7 @@ import { ChamferPanel } from "./chamfer-panel";
 import { LinearPatternPanel } from "./linear-pattern-panel";
 import { CircularPatternPanel } from "./circular-pattern-panel";
 import { MirrorPanel } from "./mirror-panel";
+import { ShellPanel } from "./shell-panel";
 
 export function PropertyManager() {
   const activeOperation = useEditorStore((s) => s.activeOperation);
@@ -25,6 +26,7 @@ export function PropertyManager() {
     linear_pattern: "Linear Pattern",
     circular_pattern: "Circular Pattern",
     mirror: "Mirror",
+    shell: "Shell",
   };
   const title = displayNames[activeOperation.type] ??
     activeOperation.type.charAt(0).toUpperCase() + activeOperation.type.slice(1);
@@ -63,6 +65,7 @@ export function PropertyManager() {
         {activeOperation.type === "linear_pattern" && <LinearPatternPanel />}
         {activeOperation.type === "circular_pattern" && <CircularPatternPanel />}
         {activeOperation.type === "mirror" && <MirrorPanel />}
+        {activeOperation.type === "shell" && <ShellPanel />}
       </div>
     </div>
   );

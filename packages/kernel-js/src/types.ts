@@ -14,7 +14,8 @@ export type ClientFeatureKind =
   | "chamfer"
   | "linear_pattern"
   | "circular_pattern"
-  | "mirror";
+  | "mirror"
+  | "shell";
 
 // Server-only feature kinds
 export type ServerFeatureKind =
@@ -23,7 +24,6 @@ export type ServerFeatureKind =
   | "boolean_intersect"
   | "sweep"
   | "loft"
-  | "shell"
   | "draft";
 
 export type FeatureKind = ClientFeatureKind | ServerFeatureKind;
@@ -96,6 +96,11 @@ export interface MirrorParams {
   plane_normal: Vec3;
 }
 
+export interface ShellParams {
+  faces_to_remove: number[];
+  thickness: number;
+}
+
 // --- Sketch 2D types ---
 
 export interface SketchPoint2D {
@@ -165,6 +170,7 @@ export type FeatureParams =
   | { type: "linear_pattern"; params: LinearPatternParams }
   | { type: "circular_pattern"; params: CircularPatternParams }
   | { type: "mirror"; params: MirrorParams }
+  | { type: "shell"; params: ShellParams }
   // Server-only params stored as opaque JSON
   | { type: ServerFeatureKind; params: Record<string, unknown> };
 
