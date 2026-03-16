@@ -43,9 +43,13 @@ lerna-debug.log*
 # Testing
 coverage
 .nyc_output
+test-results/
+test-*.png
+.playwright-mcp/
 
 # Misc
 *.tgz
 .cache
 tmp
 temp
+packages/kernel/examples/
