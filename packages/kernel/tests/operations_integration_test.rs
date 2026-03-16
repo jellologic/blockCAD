@@ -279,3 +279,108 @@ fn e2e_extrude_zero_depth_fails() {
     // Should fail because depth is 0
     assert!(result.is_err(), "Zero depth extrude should fail");
 }
+
+// --- GEOMETRIC VALIDATION (mass properties) ---
+
+use blockcad_kernel::tessellation::compute_mass_properties;
+
+#[test]
+fn box_mass_properties_correct() {
+    // 10×5×7 box → volume=350, surface_area=310, center=(5, 2.5, 3.5)
+    let mut tree = build_sketch_extrude_tree(7.0);
+    let brep = evaluate(&mut tree).unwrap();
+    let mesh = tessellate_brep(&brep, &TessellationParams::default()).unwrap();
+    let props = compute_mass_properties(&mesh);
+
+    assert!(
+        (props.volume - 350.0).abs() < 1.0,
+        "Box volume should be ~350, got {}", props.volume
+    );
+    assert!(
+        (props.surface_area - 310.0).abs() < 5.0,
+        "Box surface area should be ~310, got {}", props.surface_area
+    );
+    // Center of mass
+    assert!((props.center_of_mass[0] - 5.0).abs() < 0.5, "CoM x should be ~5");
+    assert!((props.center_of_mass[1] - 2.5).abs() < 0.5, "CoM y should be ~2.5");
+    assert!((props.center_of_mass[2] - 3.5).abs() < 0.5, "CoM z should be ~3.5");
+    // Bounding box
+    assert!(props.bbox_min[0] < 0.1 && props.bbox_min[1] < 0.1 && props.bbox_min[2] < 0.1,
+        "Bbox min should be near origin");
+    assert!((props.bbox_max[0] - 10.0).abs() < 0.1, "Bbox max x should be ~10");
+    assert!((props.bbox_max[1] - 5.0).abs() < 0.1, "Bbox max y should be ~5");
+    assert!((props.bbox_max[2] - 7.0).abs() < 0.1, "Bbox max z should be ~7");
+}
+
+#[test]
+fn fillet_reduces_volume() {
+    // Filleting an edge removes material → volume should decrease
+    let mut tree = build_sketch_extrude_tree(7.0);
+    tree.push(Feature::new(
+        "f1".into(), "Fillet".into(), FeatureKind::Fillet,
+        FeatureParams::Fillet(FilletParams { edge_indices: vec![0], radius: 1.0 }),
+    ));
+    let brep = evaluate(&mut tree).unwrap();
+    let mesh = tessellate_brep(&brep, &TessellationParams::default()).unwrap();
+    let props = compute_mass_properties(&mesh);
+
+    assert!(
+        props.volume < 350.0,
+        "Filleted box should have less volume than 350, got {}", props.volume
+    );
+    assert!(
+        props.volume > 300.0,
+        "Fillet shouldn't remove too much material, got {}", props.volume
+    );
+}
+
+#[test]
+fn chamfer_reduces_volume() {
+    // Chamfering an edge removes material → volume should decrease
+    let mut tree = build_sketch_extrude_tree(7.0);
+    tree.push(Feature::new(
+        "c1".into(), "Chamfer".into(), FeatureKind::Chamfer,
+        FeatureParams::Chamfer(ChamferParams { edge_indices: vec![0], distance: 1.0, distance2: None }),
+    ));
+    let brep = evaluate(&mut tree).unwrap();
+    let mesh = tessellate_brep(&brep, &TessellationParams::default()).unwrap();
+    let props = compute_mass_properties(&mesh);
+
+    assert!(
+        props.volume < 350.0,
+        "Chamfered box should have less volume than 350, got {}", props.volume
+    );
+    assert!(
+        props.volume > 300.0,
+        "Chamfer shouldn't remove too much material, got {}", props.volume
+    );
+}
+
+#[test]
+fn cylinder_volume_correct() {
+    // Circle r=5, extrude h=10 → volume = π*25*10 ≈ 785.4
+    let mut tree = FeatureTree::new();
+    tree.push(Feature::new(
+        "s1".into(), "Circle Sketch".into(), FeatureKind::Sketch,
+        FeatureParams::Placeholder,
+    ));
+    tree.sketches.insert(0, make_circle_sketch());
+    tree.push(Feature::new(
+        "e1".into(), "Extrude".into(), FeatureKind::Extrude,
+        FeatureParams::Extrude(ExtrudeParams::blind(Vec3::new(0.0, 0.0, 1.0), 10.0)),
+    ));
+
+    let brep = evaluate(&mut tree).unwrap();
+    let mesh = tessellate_brep(&brep, &TessellationParams::default()).unwrap();
+    let props = compute_mass_properties(&mesh);
+
+    let expected_volume = std::f64::consts::PI * 25.0 * 10.0; // ~785.4
+    assert!(
+        (props.volume - expected_volume).abs() < 30.0, // tessellation tolerance for 32-segment circle
+        "Cylinder volume should be ~{:.1}, got {:.1}", expected_volume, props.volume
+    );
+    // Bounding box: [-5,-5,0] to [5,5,10]
+    assert!(props.bbox_min[0] < -4.5, "Cylinder bbox min x should be ~-5");
+    assert!(props.bbox_max[0] > 4.5, "Cylinder bbox max x should be ~5");
+    assert!((props.bbox_max[2] - 10.0).abs() < 0.5, "Cylinder height should be ~10");
+}

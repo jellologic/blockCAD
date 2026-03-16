@@ -102,12 +102,12 @@ pub fn chamfer_edges(brep: &BRep, params: &ChamferParams) -> KernelResult<BRep> 
         let mut offset_a = normal_a.cross(&edge_dir).normalize();
         let mut offset_b = normal_b.cross(&edge_dir).normalize();
 
-        // Offset should point INTO the face (away from the shared edge, into the body)
-        // Check by dotting with the other face's normal
-        if offset_a.dot(&normal_b) < 0.0 {
+        // Offset should point INTO the solid (away from the shared edge, toward the interior).
+        // For a convex edge, the offset on face A should point AWAY from face B's normal.
+        if offset_a.dot(&normal_b) > 0.0 {
             offset_a = -offset_a;
         }
-        if offset_b.dot(&normal_a) < 0.0 {
+        if offset_b.dot(&normal_a) > 0.0 {
             offset_b = -offset_b;
         }
 
