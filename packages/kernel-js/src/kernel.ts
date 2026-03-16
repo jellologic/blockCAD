@@ -4,15 +4,16 @@ import type { FeatureEntry, FeatureParams } from "./types";
 import { KernelError } from "./errors";
 
 /**
- * Convert frontend SketchPlane (camelCase) to Rust Plane (snake_case).
+ * Convert plane to Rust format (snake_case).
+ * Handles both frontend camelCase (uAxis/vAxis) and kernel roundtrip snake_case (u_axis/v_axis).
  */
 function transformPlane(plane: any): any {
   if (!plane) return plane;
   return {
     origin: plane.origin,
     normal: plane.normal,
-    u_axis: plane.uAxis ?? plane.u_axis,
-    v_axis: plane.vAxis ?? plane.v_axis,
+    u_axis: plane.uAxis ?? plane.u_axis ?? [1, 0, 0],
+    v_axis: plane.vAxis ?? plane.v_axis ?? [0, 1, 0],
   };
 }
 
@@ -110,10 +111,6 @@ function toEntityStore(items: any[]): any {
 }
 
 /**
- * Transform frontend FeatureParams to Rust FeatureParams serde format.
- * Handles the schema differences between TS camelCase and Rust snake_case.
- */
-/**
  * Normalize entities/constraints that may be either a flat SketchEntity2D[]
  * (from the frontend editor session) or an EntityStore object
  * (from a kernel roundtrip via featureList JSON).
@@ -129,26 +126,58 @@ function normalizeEntities(raw: any): any[] {
   return [];
 }
 
-function transformParams(kind: string, params: FeatureParams): any {
+/**
+ * Detect if data is already in Rust serialization format (from kernel roundtrip).
+ * Entities: { Point: {...} } vs frontend { type: "point", ... }
+ * Constraints: { kind: { Distance: {...} } } vs frontend { kind: "distance", ... }
+ */
+function isRustEntityFormat(items: any[]): boolean {
+  if (items.length === 0) return false;
+  const first = items[0];
+  if (!first || typeof first !== "object") return false;
+  return "Point" in first || "Line" in first || "Circle" in first
+    || "Arc" in first || "Spline" in first || "Ellipse" in first;
+}
+
+function isRustConstraintFormat(items: any[]): boolean {
+  if (items.length === 0) return false;
+  const first = items[0];
+  if (!first || typeof first !== "object") return false;
+  // Rust constraints have { kind: <enum>, entities: [...], driven: bool }
+  // where kind is either a string ("Fixed") or object ({ Distance: { value } })
+  // Frontend constraints have { kind: "fixed", entityIds: [...] }
+  // The key difference: Rust has "entities" (EntityId[]), frontend has "entityIds" (string[])
+  return "entities" in first && !("entityIds" in first);
+}
+
+/**
+ * Transform frontend FeatureParams to Rust FeatureParams serde format.
+ * Handles both fresh frontend data AND kernel-roundtripped data (from featureList).
+ */
+export function transformFeatureParams(kind: string, params: FeatureParams): any {
   if (kind === "sketch" && params.type === "sketch") {
     const p = params.params;
     const entities = normalizeEntities(p.entities);
     const constraints = normalizeEntities(p.constraints);
 
-    // If entities are already in Rust format (from kernel roundtrip), pass through
-    const isRustFormat = entities.length > 0 && entities[0] && typeof entities[0] === "object"
-      && ("Point" in entities[0] || "Line" in entities[0] || "Circle" in entities[0] || "Arc" in entities[0]);
+    // Check if data is already in Rust format (from kernel roundtrip via featureList)
+    const entitiesAreRust = isRustEntityFormat(entities);
+    const constraintsAreRust = isRustConstraintFormat(constraints);
 
     return {
       type: "sketch",
       params: {
         plane: transformPlane(p.plane),
-        entities: isRustFormat
+        entities: entitiesAreRust
           ? toEntityStore(entities)
           : toEntityStore(entities.map(transformSketchEntity)),
-        constraints: isRustFormat
+        constraints: constraintsAreRust
           ? toEntityStore(constraints)
           : toEntityStore(constraints.map(transformSketchConstraint)),
+        // Preserve extra sketch data if present (from kernel roundtrip)
+        ...((p as any).block_definitions ? { block_definitions: (p as any).block_definitions } : {}),
+        ...((p as any).block_instances ? { block_instances: (p as any).block_instances } : {}),
+        ...((p as any).construction_entities ? { construction_entities: (p as any).construction_entities } : {}),
       },
     };
   }
@@ -177,7 +206,7 @@ export class KernelClient {
 
   addFeature(kind: string, _name: string, params: FeatureParams): string {
     try {
-      const transformed = transformParams(kind, params);
+      const transformed = transformFeatureParams(kind, params);
       return this.handle.add_feature(kind, JSON.stringify(transformed));
     } catch (err) {
       throw KernelError.fromWasm(String(err));

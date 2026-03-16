@@ -2,6 +2,7 @@ import { AssemblyHandle } from "@blockCAD/kernel-wasm";
 import { parseMeshBytes, type MeshData } from "./mesh";
 import type { FeatureParams } from "./types";
 import { KernelError } from "./errors";
+import { transformFeatureParams } from "./kernel";
 
 /**
  * High-level TypeScript client for assembly operations.
@@ -22,7 +23,8 @@ export class AssemblyClient {
   /** Add a feature to a specific part. Returns the feature ID. */
   addFeatureToPart(partId: string, kind: string, params: FeatureParams): string {
     try {
-      return this.handle.add_feature_to_part(partId, kind, JSON.stringify(params));
+      const transformed = transformFeatureParams(kind, params);
+      return this.handle.add_feature_to_part(partId, kind, JSON.stringify(transformed));
     } catch (err) {
       throw KernelError.fromWasm(String(err));
     }

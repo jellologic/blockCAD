@@ -253,4 +253,47 @@ mod tests {
         };
         assert!(chamfer_edges(&brep, &params).is_err());
     }
+
+    #[test]
+    fn chamfer_tessellates_without_error() {
+        use crate::tessellation::{tessellate_brep, TessellationParams};
+
+        let brep = build_box_brep(10.0, 10.0, 10.0).unwrap();
+        let params = ChamferParams {
+            edge_indices: vec![0],
+            distance: 1.0,
+            distance2: None,
+        };
+        let result = chamfer_edges(&brep, &params).unwrap();
+        let mesh = tessellate_brep(&result, &TessellationParams::default()).unwrap();
+        mesh.validate().unwrap();
+        assert!(mesh.triangle_count() > 0, "Chamfer mesh should have triangles");
+    }
+
+    #[test]
+    fn chamfer_multiple_edges() {
+        let brep = build_box_brep(10.0, 10.0, 10.0).unwrap();
+        let params = ChamferParams {
+            edge_indices: vec![0, 1, 2],
+            distance: 1.0,
+            distance2: None,
+        };
+        let result = chamfer_edges(&brep, &params).unwrap();
+        // 6 original + 3 chamfer faces = 9
+        assert_eq!(result.faces.len(), 9);
+        assert!(matches!(result.body, Body::Solid(_)));
+    }
+
+    #[test]
+    fn chamfer_asymmetric_distances() {
+        let brep = build_box_brep(10.0, 10.0, 10.0).unwrap();
+        let params = ChamferParams {
+            edge_indices: vec![0],
+            distance: 1.0,
+            distance2: Some(2.0),
+        };
+        let result = chamfer_edges(&brep, &params).unwrap();
+        assert_eq!(result.faces.len(), 7);
+        assert!(matches!(result.body, Body::Solid(_)));
+    }
 }

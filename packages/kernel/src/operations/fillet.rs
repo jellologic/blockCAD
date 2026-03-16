@@ -155,22 +155,23 @@ pub fn fillet_edges(brep: &BRep, params: &FilletParams) -> KernelResult<BRep> {
         // The total sweep angle of the fillet arc = pi - dihedral_angle = 2 * half_angle
         let sweep_angle = 2.0 * half_angle;
 
-        // At each point along the edge (start and end), compute N+1 arc points
+        // At each point along the edge (start and end), compute N+1 arc points.
+        // The arc lies in the plane perpendicular to edge_dir, sweeping from the
+        // trim point on face A to the trim point on face B.
         let arc_points_at = |edge_pt: Pt3| -> Vec<Pt3> {
             let center = edge_pt + bisector * center_dist;
+            // Start direction: from center toward the trim point on face A
+            let start_dir = (edge_pt + offset_a * trim - center).normalize();
+            // End direction: from center toward the trim point on face B
+            let end_dir = (edge_pt + offset_b * trim - center).normalize();
+            // Tangent vector for the arc (perpendicular to start_dir in the arc plane)
+            let arc_tangent = edge_dir.cross(&start_dir).normalize();
+
             let mut pts = Vec::with_capacity(FILLET_SEGMENTS + 1);
             for seg in 0..=FILLET_SEGMENTS {
                 let t = seg as f64 / FILLET_SEGMENTS as f64;
-                let angle = -half_angle + t * sweep_angle;
-                // Point on the arc: center + r * (cos(angle) * (-bisector) + sin(angle) * tangent)
-                // We need a tangent vector perpendicular to bisector in the arc plane
-                // The arc plane is perpendicular to edge_dir
-                // offset_a rotated towards offset_b
-                let pt = center - bisector * (r * angle.cos())
-                    + (offset_a.cross(&bisector).normalize()) * (r * angle.sin());
-                // Actually let's use a cleaner parameterization:
-                // The start of the arc is at ta (on face A side) and the end is at tb (on face B side)
-                // So start direction from center = offset_a * trim - bisector * center_dist (normalized to r)
+                let angle = t * sweep_angle;
+                let pt = center + start_dir * (r * angle.cos()) + arc_tangent * (r * angle.sin());
                 pts.push(pt);
             }
             pts
@@ -323,5 +324,43 @@ mod tests {
             "Filleted box should have more than 6 faces, got {}",
             result.faces.len()
         );
+    }
+
+    #[test]
+    fn fillet_tessellates_without_error() {
+        use crate::tessellation::{tessellate_brep, TessellationParams};
+
+        let brep = build_box_brep(10.0, 10.0, 10.0).unwrap();
+        let params = FilletParams {
+            edge_indices: vec![0],
+            radius: 1.0,
+        };
+        let result = fillet_edges(&brep, &params).unwrap();
+        let mesh = tessellate_brep(&result, &TessellationParams::default()).unwrap();
+        mesh.validate().unwrap();
+        assert!(mesh.triangle_count() > 0, "Fillet mesh should have triangles");
+        // Fillet should have more triangles than the original box (12 base + fillet arc triangles)
+        let box_mesh = tessellate_brep(&brep, &TessellationParams::default()).unwrap();
+        assert!(
+            mesh.triangle_count() > box_mesh.triangle_count(),
+            "Fillet mesh ({}) should have more triangles than box ({})",
+            mesh.triangle_count(), box_mesh.triangle_count()
+        );
+    }
+
+    #[test]
+    fn fillet_multiple_edges() {
+        let brep = build_box_brep(10.0, 10.0, 10.0).unwrap();
+        let params = FilletParams {
+            edge_indices: vec![0, 1, 2],
+            radius: 1.0,
+        };
+        let result = fillet_edges(&brep, &params).unwrap();
+        // 6 original + 3 * FILLET_SEGMENTS fillet faces
+        assert_eq!(
+            result.faces.len(),
+            6 + 3 * FILLET_SEGMENTS,
+        );
+        assert!(matches!(result.body, Body::Solid(_)));
     }
 }
