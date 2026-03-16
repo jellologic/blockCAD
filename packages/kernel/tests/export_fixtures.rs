@@ -24,7 +24,7 @@ use blockcad_kernel::operations::revolve::RevolveParams;
 use blockcad_kernel::operations::shell::{ShellParams, shell_solid};
 use blockcad_kernel::operations::sweep::{sweep_profile, SweepParams};
 use blockcad_kernel::sketch::constraint::{Constraint, ConstraintKind};
-use blockcad_kernel::sketch::entity::SketchEntity;
+use blockcad_kernel::sketch::entity::{SketchEntity, SketchEntityId};
 use blockcad_kernel::sketch::Sketch;
 use blockcad_kernel::tessellation::{compute_mass_properties, tessellate_brep, TessellationParams};
 use blockcad_kernel::topology::builders::{build_box_brep, extract_face_polygons, rebuild_brep_from_faces};
@@ -82,6 +82,26 @@ fn build_sketch_extrude_tree(depth: f64) -> FeatureTree {
     tree.push(Feature::new("e1".into(), "Extrude".into(), FeatureKind::Extrude,
         FeatureParams::Extrude(ExtrudeParams::blind(Vec3::new(0.0, 0.0, 1.0), depth))));
     tree
+}
+
+fn make_20x20_rectangle_sketch() -> Sketch {
+    let mut sketch = Sketch::new(Plane::xy(0.0));
+    let p0 = sketch.add_entity(SketchEntity::Point { position: Pt2::new(0.0, 0.0) });
+    let p1 = sketch.add_entity(SketchEntity::Point { position: Pt2::new(18.0, 0.5) });
+    let p2 = sketch.add_entity(SketchEntity::Point { position: Pt2::new(18.0, 18.0) });
+    let p3 = sketch.add_entity(SketchEntity::Point { position: Pt2::new(0.5, 18.0) });
+    let bottom = sketch.add_entity(SketchEntity::Line { start: p0, end: p1 });
+    let right = sketch.add_entity(SketchEntity::Line { start: p1, end: p2 });
+    let top = sketch.add_entity(SketchEntity::Line { start: p2, end: p3 });
+    let left = sketch.add_entity(SketchEntity::Line { start: p3, end: p0 });
+    sketch.add_constraint(Constraint::new(ConstraintKind::Fixed, vec![p0]));
+    sketch.add_constraint(Constraint::new(ConstraintKind::Horizontal, vec![bottom]));
+    sketch.add_constraint(Constraint::new(ConstraintKind::Horizontal, vec![top]));
+    sketch.add_constraint(Constraint::new(ConstraintKind::Vertical, vec![right]));
+    sketch.add_constraint(Constraint::new(ConstraintKind::Vertical, vec![left]));
+    sketch.add_constraint(Constraint::new(ConstraintKind::Distance { value: 20.0 }, vec![p0, p1]));
+    sketch.add_constraint(Constraint::new(ConstraintKind::Distance { value: 20.0 }, vec![p1, p2]));
+    sketch
 }
 
 /// Smaller 4x2 rectangle centered inside the 10x5 box, on the bottom face (z=0).
@@ -1304,4 +1324,357 @@ fn export_cylinder_chamfer_fixture() {
     let cylinder_vol = std::f64::consts::PI * 25.0 * 10.0;
     assert!(props.volume < cylinder_vol,
         "Chamfered cylinder volume ({}) should be less than full cylinder ({:.0})", props.volume, cylinder_vol);
+}
+
+#[test]
+fn export_stress_thin_shell_fixture() {
+    // Stress test: Extrude 20x20x20 box -> Shell(top face removed, t=0.2)
+    // Very thin walls stress the tessellator and boolean/shell logic.
+    let mut tree = FeatureTree::new();
+    tree.push(Feature::new("s1".into(), "Sketch".into(), FeatureKind::Sketch, FeatureParams::Placeholder));
+
+    // Build a 20x20 rectangle sketch
+    let mut sketch = Sketch::new(Plane::xy(0.0));
+    let p0 = sketch.add_entity(SketchEntity::Point { position: Pt2::new(0.0, 0.0) });
+    let p1 = sketch.add_entity(SketchEntity::Point { position: Pt2::new(18.0, 0.5) });
+    let p2 = sketch.add_entity(SketchEntity::Point { position: Pt2::new(18.0, 18.0) });
+    let p3 = sketch.add_entity(SketchEntity::Point { position: Pt2::new(0.5, 18.0) });
+    let bottom = sketch.add_entity(SketchEntity::Line { start: p0, end: p1 });
+    let right = sketch.add_entity(SketchEntity::Line { start: p1, end: p2 });
+    let top = sketch.add_entity(SketchEntity::Line { start: p2, end: p3 });
+    let left = sketch.add_entity(SketchEntity::Line { start: p3, end: p0 });
+    sketch.add_constraint(Constraint::new(ConstraintKind::Fixed, vec![p0]));
+    sketch.add_constraint(Constraint::new(ConstraintKind::Horizontal, vec![bottom]));
+    sketch.add_constraint(Constraint::new(ConstraintKind::Horizontal, vec![top]));
+    sketch.add_constraint(Constraint::new(ConstraintKind::Vertical, vec![right]));
+    sketch.add_constraint(Constraint::new(ConstraintKind::Vertical, vec![left]));
+    sketch.add_constraint(Constraint::new(ConstraintKind::Distance { value: 20.0 }, vec![p0, p1]));
+    sketch.add_constraint(Constraint::new(ConstraintKind::Distance { value: 20.0 }, vec![p1, p2]));
+
+    tree.sketches.insert(0, sketch);
+    tree.push(Feature::new("e1".into(), "Extrude".into(), FeatureKind::Extrude,
+        FeatureParams::Extrude(ExtrudeParams::blind(Vec3::new(0.0, 0.0, 1.0), 20.0))));
+
+    // Shell: remove top face, wall thickness 0.2 (very thin)
+    tree.push(Feature::new(
+        "sh1".into(), "Shell".into(), FeatureKind::Shell,
+        FeatureParams::Shell(ShellParams {
+            faces_to_remove: vec![1], // top face
+            thickness: 0.2,
+        }),
+    ));
+
+    let brep = evaluate(&mut tree).unwrap();
+    let mesh = tessellate_brep(&brep, &TessellationParams::default()).unwrap();
+    let stl = export_stl_binary(&mesh);
+    let props = compute_mass_properties(&mesh);
+    write_fixture("stress_thin_shell", &stl, &props);
+
+    // Solid box volume = 8000. Thin shell should be much less.
+    // Approximate: outer 20x20x20 minus inner 19.6x19.6x19.8 = 8000 - 7601.728 ≈ 398.3
+    assert!(props.volume > 100.0,
+        "Thin shell volume ({}) should be > 100", props.volume);
+    assert!(props.volume < 1000.0,
+        "Thin shell volume ({}) should be < 1000 (solid box is 8000)", props.volume);
+}
+
+#[test]
+fn export_stress_large_fillet_fixture() {
+    let mut tree = build_sketch_extrude_tree(7.0);
+    tree.push(Feature::new("f1".into(), "Fillet".into(), FeatureKind::Fillet,
+        FeatureParams::Fillet(FilletParams { edge_indices: vec![0], radius: 2.0 })));
+    let brep = evaluate(&mut tree).unwrap();
+    let mesh = tessellate_brep(&brep, &TessellationParams::default()).unwrap();
+    let stl = export_stl_binary(&mesh);
+    let props = compute_mass_properties(&mesh);
+    write_fixture("stress_large_fillet", &stl, &props);
+
+    // Box = 10*5*7 = 350, large fillet (r=2.0) removes noticeable material
+    assert!(props.volume < 350.0,
+        "Large fillet volume ({}) should be less than 350", props.volume);
+}
+
+#[test]
+fn export_stress_asymmetric_chamfer_fixture() {
+    // Stress test: Extrude 10x5x7 box -> Chamfer(edge 0, d1=1.0, d2=0.5)
+    let mut tree = build_sketch_extrude_tree(7.0);
+    tree.push(Feature::new(
+        "ch1".into(), "Chamfer".into(), FeatureKind::Chamfer,
+        FeatureParams::Chamfer(ChamferParams {
+            edge_indices: vec![0],
+            distance: 1.0,
+            distance2: Some(0.5),
+        }),
+    ));
+    let brep = evaluate(&mut tree).unwrap();
+    let mesh = tessellate_brep(&brep, &TessellationParams::default()).unwrap();
+    let stl = export_stl_binary(&mesh);
+    let props = compute_mass_properties(&mesh);
+    write_fixture("stress_asymmetric_chamfer", &stl, &props);
+
+    // Box volume = 10*5*7 = 350. Asymmetric chamfer removes a triangular prism
+    // with cross-section 0.5 * d1 * d2 = 0.5 * 1.0 * 0.5 = 0.25, times edge length.
+    // Volume should be slightly less than 350.
+    assert!(props.volume < 350.0,
+        "Asymmetric chamfer volume ({}) should be < 350", props.volume);
+    assert!(props.volume > 300.0,
+        "Asymmetric chamfer volume ({}) should be > 300", props.volume);
+}
+
+/// 2x2 rectangle sketch for tall/thin extrude stress test.
+fn make_2x2_rectangle_sketch() -> Sketch {
+    let mut sketch = Sketch::new(Plane::xy(0.0));
+    let p0 = sketch.add_entity(SketchEntity::Point { position: Pt2::new(0.0, 0.0) });
+    let p1 = sketch.add_entity(SketchEntity::Point { position: Pt2::new(1.8, 0.5) });
+    let p2 = sketch.add_entity(SketchEntity::Point { position: Pt2::new(1.8, 1.8) });
+    let p3 = sketch.add_entity(SketchEntity::Point { position: Pt2::new(0.5, 1.8) });
+    let bottom = sketch.add_entity(SketchEntity::Line { start: p0, end: p1 });
+    let right = sketch.add_entity(SketchEntity::Line { start: p1, end: p2 });
+    let top = sketch.add_entity(SketchEntity::Line { start: p2, end: p3 });
+    let left = sketch.add_entity(SketchEntity::Line { start: p3, end: p0 });
+    sketch.add_constraint(Constraint::new(ConstraintKind::Fixed, vec![p0]));
+    sketch.add_constraint(Constraint::new(ConstraintKind::Horizontal, vec![bottom]));
+    sketch.add_constraint(Constraint::new(ConstraintKind::Horizontal, vec![top]));
+    sketch.add_constraint(Constraint::new(ConstraintKind::Vertical, vec![right]));
+    sketch.add_constraint(Constraint::new(ConstraintKind::Vertical, vec![left]));
+    sketch.add_constraint(Constraint::new(ConstraintKind::Distance { value: 2.0 }, vec![p0, p1]));
+    sketch.add_constraint(Constraint::new(ConstraintKind::Distance { value: 2.0 }, vec![p1, p2]));
+    sketch
+}
+
+#[test]
+fn export_stress_tall_thin_extrude_fixture() {
+    // Stress test: 2x2 rectangle extruded 50mm — high aspect ratio (25:1).
+    let mut tree = FeatureTree::new();
+    tree.push(Feature::new("s1".into(), "Sketch".into(), FeatureKind::Sketch, FeatureParams::Placeholder));
+    tree.sketches.insert(0, make_2x2_rectangle_sketch());
+    tree.push(Feature::new("e1".into(), "Extrude".into(), FeatureKind::Extrude,
+        FeatureParams::Extrude(ExtrudeParams::blind(Vec3::new(0.0, 0.0, 1.0), 50.0))));
+
+    let brep = evaluate(&mut tree).unwrap();
+    let mesh = tessellate_brep(&brep, &TessellationParams::default()).unwrap();
+    let stl = export_stl_binary(&mesh);
+    let props = compute_mass_properties(&mesh);
+    write_fixture("stress_tall_thin_extrude", &stl, &props);
+
+    // Volume = 2 * 2 * 50 = 200
+    assert!((props.volume - 200.0).abs() < 1.0,
+        "Tall thin extrude volume ({}) should be ~200", props.volume);
+}
+
+#[test]
+fn export_stress_steep_draft_fixture() {
+    // Stress test: Extrude 10x5x7 box -> Draft(2 side faces, 15 deg)
+    // Steep taper angle significantly changes the geometry.
+    let mut tree = build_sketch_extrude_tree(7.0);
+
+    // Draft: apply 15 deg draft to 2 side faces along Z pull direction
+    tree.push(Feature::new(
+        "d1".into(), "Draft".into(), FeatureKind::Draft,
+        FeatureParams::Draft(DraftParams {
+            face_indices: vec![2, 3], // two side faces
+            pull_direction: Vec3::new(0.0, 0.0, 1.0),
+            angle: 15.0_f64.to_radians(),
+        }),
+    ));
+
+    let brep = evaluate(&mut tree).unwrap();
+    let mesh = tessellate_brep(&brep, &TessellationParams::default()).unwrap();
+    let stl = export_stl_binary(&mesh);
+    let props = compute_mass_properties(&mesh);
+    write_fixture("stress_steep_draft", &stl, &props);
+
+    // Original box volume = 350. 15-degree draft on 2 side faces tilts them outward,
+    // increasing the volume to ~445. It should differ significantly from 350.
+    assert!(props.volume > 350.0,
+        "Steep draft volume ({}) should be > 350 (original box)", props.volume);
+    assert!(props.volume < 600.0,
+        "Steep draft volume ({}) should be < 600", props.volume);
+}
+
+#[test]
+fn export_stress_multi_face_shell_fixture() {
+    // Stress test: Extrude 10x5x7 box -> Shell(remove top AND front faces, t=0.5)
+    // Two openings: top (face 1, +Z) and front (face 2, -Y).
+    let mut tree = build_sketch_extrude_tree(7.0);
+    tree.push(Feature::new(
+        "sh1".into(), "Shell".into(), FeatureKind::Shell,
+        FeatureParams::Shell(ShellParams {
+            faces_to_remove: vec![1, 2], // top face + front face
+            thickness: 0.5,
+        }),
+    ));
+
+    let brep = evaluate(&mut tree).unwrap();
+    let mesh = tessellate_brep(&brep, &TessellationParams::default()).unwrap();
+    let stl = export_stl_binary(&mesh);
+    let props = compute_mass_properties(&mesh);
+    write_fixture("stress_multi_face_shell", &stl, &props);
+
+    // Solid box volume = 10*5*7 = 350. Shell with 2 openings removes more
+    // material than single-face shell. Volume should be well below 350
+    // but still substantial (walls are 0.5 thick).
+    assert!(props.volume > 30.0,
+        "Multi-face shell volume ({}) should be > 30", props.volume);
+    assert!(props.volume < 300.0,
+        "Multi-face shell volume ({}) should be < 300 (solid box is 350)", props.volume);
+}
+
+#[test]
+fn export_stress_thick_shell() {
+    // 10x10x10 box -> Shell(top removed, t=4.0)
+    // Nearly solid: inner cavity is only 2x2x6.
+    // Volume = 1000 - 24 = 976
+    let box_brep = build_box_brep(10.0, 10.0, 10.0).unwrap();
+
+    // Find the top face (normal pointing in +Z direction) to remove
+    let face_polys = extract_face_polygons(&box_brep).unwrap();
+    let top_face_idx = face_polys.iter().enumerate()
+        .find(|(_, (_, n))| n.z > 0.9)
+        .map(|(i, _)| i as u32)
+        .expect("Should find a top face with +Z normal");
+
+    let shell_params = ShellParams {
+        faces_to_remove: vec![top_face_idx],
+        thickness: 4.0,
+    };
+    let shelled = shell_solid(&box_brep, &shell_params).unwrap();
+
+    let mesh = tessellate_brep(&shelled, &TessellationParams::default()).unwrap();
+    let stl = export_stl_binary(&mesh);
+    let props = compute_mass_properties(&mesh);
+    write_fixture("stress_thick_shell", &stl, &props);
+
+    // Volume ~827: outer 10x10x10 minus inner cavity.
+    // Shell inward offset of 4.0 on 5 retained faces leaves a small cavity open at the top.
+    assert!(props.volume.abs() > 750.0,
+        "Thick shell volume ({}) should be > 750", props.volume);
+    assert!(props.volume.abs() < 900.0,
+        "Thick shell volume ({}) should be < 900", props.volume);
+}
+
+#[test]
+fn export_stress_flat_extrude_fixture() {
+    // Stress test: 20x20 rectangle extruded only 0.5mm — very flat geometry.
+    let mut tree = FeatureTree::new();
+    tree.push(Feature::new("s1".into(), "Sketch".into(), FeatureKind::Sketch, FeatureParams::Placeholder));
+    tree.sketches.insert(0, make_20x20_rectangle_sketch());
+    tree.push(Feature::new("e1".into(), "Extrude".into(), FeatureKind::Extrude,
+        FeatureParams::Extrude(ExtrudeParams::blind(Vec3::new(0.0, 0.0, 1.0), 0.5))));
+
+    let brep = evaluate(&mut tree).unwrap();
+    let mesh = tessellate_brep(&brep, &TessellationParams::default()).unwrap();
+    let stl = export_stl_binary(&mesh);
+    let props = compute_mass_properties(&mesh);
+    write_fixture("stress_flat_extrude", &stl, &props);
+
+    // Volume = 20 * 20 * 0.5 = 200
+    assert!((props.volume - 200.0).abs() < 1.0,
+        "Flat extrude volume ({}) should be ~200", props.volume);
+}
+
+fn make_octagon_sketch() -> Sketch {
+    let mut sketch = Sketch::new(Plane::xy(0.0));
+    let r = 5.0_f64;
+    // 8 vertices at 45-degree intervals (circumradius = 5)
+    let coords: Vec<(f64, f64)> = (0..8)
+        .map(|i| {
+            let angle = i as f64 * std::f64::consts::FRAC_PI_4; // 45 deg = pi/4
+            (r * angle.cos(), r * angle.sin())
+        })
+        .collect();
+
+    let points: Vec<blockcad_kernel::id::EntityId<SketchEntity>> = coords
+        .iter()
+        .map(|&(x, y)| sketch.add_entity(SketchEntity::Point { position: Pt2::new(x, y) }))
+        .collect();
+
+    // 8 lines connecting consecutive vertices
+    for i in 0..8 {
+        let next = (i + 1) % 8;
+        sketch.add_entity(SketchEntity::Line { start: points[i], end: points[next] });
+    }
+
+    // Fix all points
+    for &p in &points {
+        sketch.add_constraint(Constraint::new(ConstraintKind::Fixed, vec![p]));
+    }
+    sketch
+}
+
+#[test]
+fn export_stress_octagon_fixture() {
+    // Stress test: Regular octagon (8 vertices, circumradius=5) extruded 5mm
+    let mut tree = FeatureTree::new();
+    tree.push(Feature::new("s1".into(), "Sketch".into(), FeatureKind::Sketch, FeatureParams::Placeholder));
+    tree.sketches.insert(0, make_octagon_sketch());
+    tree.push(Feature::new("e1".into(), "Extrude".into(), FeatureKind::Extrude,
+        FeatureParams::Extrude(ExtrudeParams::blind(Vec3::new(0.0, 0.0, 1.0), 5.0))));
+
+    let brep = evaluate(&mut tree).unwrap();
+    let mesh = tessellate_brep(&brep, &TessellationParams::default()).unwrap();
+    let stl = export_stl_binary(&mesh);
+    let props = compute_mass_properties(&mesh);
+    write_fixture("stress_octagon", &stl, &props);
+
+    // Regular octagon area = 2*sqrt(2) * r^2 = 2 * 1.41421356 * 25 = 70.71
+    // Volume = area * height = 70.71 * 5 = 353.6
+    assert!((props.volume - 353.6).abs() < 10.0,
+        "Octagon extrude volume should be ~353.6, got {}", props.volume);
+}
+
+/// Regular hexagon sketch with circumradius 5, centered at origin.
+/// 6 vertices at 60-degree intervals, 6 lines connecting them.
+fn make_hexagon_sketch() -> Sketch {
+    let mut sketch = Sketch::new(Plane::xy(0.0));
+    // Hexagon vertices at radius 5, 60° intervals (counterclockwise)
+    let r = 5.0_f64;
+    let angles: Vec<f64> = (0..6).map(|k| (k as f64) * std::f64::consts::FRAC_PI_3).collect();
+    let coords: Vec<(f64, f64)> = angles.iter().map(|a| (r * a.cos(), r * a.sin())).collect();
+
+    let p0 = sketch.add_entity(SketchEntity::Point { position: Pt2::new(coords[0].0, coords[0].1) });
+    let p1 = sketch.add_entity(SketchEntity::Point { position: Pt2::new(coords[1].0, coords[1].1) });
+    let p2 = sketch.add_entity(SketchEntity::Point { position: Pt2::new(coords[2].0, coords[2].1) });
+    let p3 = sketch.add_entity(SketchEntity::Point { position: Pt2::new(coords[3].0, coords[3].1) });
+    let p4 = sketch.add_entity(SketchEntity::Point { position: Pt2::new(coords[4].0, coords[4].1) });
+    let p5 = sketch.add_entity(SketchEntity::Point { position: Pt2::new(coords[5].0, coords[5].1) });
+
+    let _e0 = sketch.add_entity(SketchEntity::Line { start: p0, end: p1 });
+    let _e1 = sketch.add_entity(SketchEntity::Line { start: p1, end: p2 });
+    let _e2 = sketch.add_entity(SketchEntity::Line { start: p2, end: p3 });
+    let _e3 = sketch.add_entity(SketchEntity::Line { start: p3, end: p4 });
+    let _e4 = sketch.add_entity(SketchEntity::Line { start: p4, end: p5 });
+    let _e5 = sketch.add_entity(SketchEntity::Line { start: p5, end: p0 });
+
+    // Constraints: Fixed on first point, Distance between adjacent points (side length = r = 5)
+    sketch.add_constraint(Constraint::new(ConstraintKind::Fixed, vec![p0]));
+    sketch.add_constraint(Constraint::new(ConstraintKind::Distance { value: 5.0 }, vec![p0, p1]));
+    sketch.add_constraint(Constraint::new(ConstraintKind::Distance { value: 5.0 }, vec![p1, p2]));
+    sketch.add_constraint(Constraint::new(ConstraintKind::Distance { value: 5.0 }, vec![p2, p3]));
+    sketch.add_constraint(Constraint::new(ConstraintKind::Distance { value: 5.0 }, vec![p3, p4]));
+    sketch.add_constraint(Constraint::new(ConstraintKind::Distance { value: 5.0 }, vec![p4, p5]));
+    sketch.add_constraint(Constraint::new(ConstraintKind::Distance { value: 5.0 }, vec![p5, p0]));
+    sketch
+}
+
+#[test]
+fn export_stress_hexagon_fixture() {
+    // Stress test: Regular hexagon (6 vertices, circumradius 5) extruded 5mm
+    let mut tree = FeatureTree::new();
+    tree.push(Feature::new("s1".into(), "Sketch".into(), FeatureKind::Sketch, FeatureParams::Placeholder));
+    tree.sketches.insert(0, make_hexagon_sketch());
+    tree.push(Feature::new("e1".into(), "Extrude".into(), FeatureKind::Extrude,
+        FeatureParams::Extrude(ExtrudeParams::blind(Vec3::new(0.0, 0.0, 1.0), 5.0))));
+
+    let brep = evaluate(&mut tree).unwrap();
+    let mesh = tessellate_brep(&brep, &TessellationParams::default()).unwrap();
+    let stl = export_stl_binary(&mesh);
+    let props = compute_mass_properties(&mesh);
+    write_fixture("stress_hexagon", &stl, &props);
+
+    // Regular hexagon area = (3*sqrt(3)/2) * r^2 = (3*sqrt(3)/2) * 25 ≈ 64.95
+    // Volume = area * height = 64.95 * 5 ≈ 324.76
+    let expected_volume = 3.0 * 3.0_f64.sqrt() / 2.0 * 25.0 * 5.0;
+    assert!((props.volume - expected_volume).abs() < 5.0,
+        "Hexagon extrude volume ({}) should be ~{:.1}", props.volume, expected_volume);
 }

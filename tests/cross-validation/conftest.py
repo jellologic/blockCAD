@@ -253,3 +253,63 @@ def l_shape_shell():
 def cylinder_chamfer():
     """Cylinder r=5, h=10 with d=0.5 chamfer on edge 0."""
     return load_stl("cylinder_chamfer_d05"), load_kernel_props("cylinder_chamfer_d05")
+
+
+@pytest.fixture
+def stress_thin_shell():
+    """20x20x20 box shelled with t=0.2, top face removed. Very thin walls."""
+    return load_stl("stress_thin_shell"), load_kernel_props("stress_thin_shell")
+
+
+@pytest.fixture
+def stress_large_fillet():
+    """10x5x7 box with r=2.0 fillet on edge 0. Large radius approaching the 5mm edge."""
+    return load_stl("stress_large_fillet"), load_kernel_props("stress_large_fillet")
+
+
+@pytest.fixture
+def stress_asymmetric_chamfer():
+    """10x5x7 box with asymmetric chamfer (d1=1.0, d2=0.5) on edge 0."""
+    return load_stl("stress_asymmetric_chamfer"), load_kernel_props("stress_asymmetric_chamfer")
+
+
+@pytest.fixture
+def stress_tall_thin_extrude():
+    """2x2 rectangle extruded 50mm — high aspect ratio (25:1). Volume = 200."""
+    return load_stl("stress_tall_thin_extrude"), load_kernel_props("stress_tall_thin_extrude")
+
+
+@pytest.fixture
+def stress_multi_face_shell():
+    """10x5x7 box -> Shell(remove top AND front, t=0.5). Two openings."""
+    return load_stl("stress_multi_face_shell"), load_kernel_props("stress_multi_face_shell")
+
+
+@pytest.fixture
+def stress_steep_draft():
+    """10x5x7 box with 15-degree draft on two side faces."""
+    return load_stl("stress_steep_draft"), load_kernel_props("stress_steep_draft")
+
+
+@pytest.fixture
+def stress_thick_shell():
+    """10x10x10 box -> Shell(top removed, t=4.0). Nearly solid — inner cavity 2x2x6."""
+    return load_stl("stress_thick_shell"), load_kernel_props("stress_thick_shell")
+
+
+@pytest.fixture
+def stress_flat_extrude():
+    """20x20 rectangle extruded 0.5mm — very flat geometry. Volume = 200."""
+    return load_stl("stress_flat_extrude"), load_kernel_props("stress_flat_extrude")
+
+
+@pytest.fixture
+def stress_octagon():
+    """Regular octagon (8 vertices, circumradius=5) extruded 5mm."""
+    return load_stl("stress_octagon"), load_kernel_props("stress_octagon")
+
+
+@pytest.fixture
+def stress_hexagon():
+    """Regular hexagon (6 vertices, circumradius=5) extruded 5mm."""
+    return load_stl("stress_hexagon"), load_kernel_props("stress_hexagon")
