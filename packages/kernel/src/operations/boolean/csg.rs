@@ -318,9 +318,126 @@ fn brep_to_polygons(brep: &BRep) -> KernelResult<Vec<CsgPolygon>> {
     }).collect())
 }
 
+/// Resolve T-junctions: if a vertex from one polygon lies on an edge of another
+/// polygon (within tolerance), split that edge by inserting the vertex.
+fn resolve_t_junctions(polygons: &mut Vec<CsgPolygon>) {
+    let tol = 1e-6;
+    let tol2 = tol * tol;
+
+    // Spatial hash: quantize to grid cells for fast lookup
+    let cell_size = tol * 100.0;
+    let quantize = |v: f64| -> i64 { (v / cell_size).floor() as i64 };
+
+    // Collect all unique vertices from all polygons
+    let mut all_verts: Vec<Pt3> = Vec::new();
+    for poly in polygons.iter() {
+        for v in &poly.vertices {
+            let dominated = all_verts.iter().any(|e| {
+                let dx = e.x - v.x;
+                let dy = e.y - v.y;
+                let dz = e.z - v.z;
+                dx * dx + dy * dy + dz * dz < tol2
+            });
+            if !dominated {
+                all_verts.push(*v);
+            }
+        }
+    }
+
+    // Build spatial hash of vertices
+    use std::collections::HashMap;
+    let mut vert_grid: HashMap<(i64, i64, i64), Vec<usize>> = HashMap::new();
+    for (i, v) in all_verts.iter().enumerate() {
+        let key = (quantize(v.x), quantize(v.y), quantize(v.z));
+        for dx in -1..=1 {
+            for dy in -1..=1 {
+                for dz in -1..=1 {
+                    vert_grid
+                        .entry((key.0 + dx, key.1 + dy, key.2 + dz))
+                        .or_default()
+                        .push(i);
+                }
+            }
+        }
+    }
+
+    // For each polygon, check each edge against nearby vertices
+    for poly_idx in 0..polygons.len() {
+        let n = polygons[poly_idx].vertices.len();
+        let mut new_verts: Vec<Pt3> = Vec::new();
+
+        for i in 0..n {
+            let a = polygons[poly_idx].vertices[i];
+            let b = polygons[poly_idx].vertices[(i + 1) % n];
+            new_verts.push(a);
+
+            let edge = Vec3::new(b.x - a.x, b.y - a.y, b.z - a.z);
+            let edge_len2 = edge.x * edge.x + edge.y * edge.y + edge.z * edge.z;
+            if edge_len2 < tol2 {
+                continue;
+            }
+
+            // Find candidate vertices near this edge
+            let mid_key = (
+                quantize((a.x + b.x) * 0.5),
+                quantize((a.y + b.y) * 0.5),
+                quantize((a.z + b.z) * 0.5),
+            );
+
+            let mut insertions: Vec<(f64, Pt3)> = Vec::new();
+
+            if let Some(candidates) = vert_grid.get(&mid_key) {
+                for &vi in candidates {
+                    let v = all_verts[vi];
+                    // Skip if v is an endpoint
+                    let da = (v.x - a.x) * (v.x - a.x) + (v.y - a.y) * (v.y - a.y) + (v.z - a.z) * (v.z - a.z);
+                    let db = (v.x - b.x) * (v.x - b.x) + (v.y - b.y) * (v.y - b.y) + (v.z - b.z) * (v.z - b.z);
+                    if da < tol2 || db < tol2 {
+                        continue;
+                    }
+
+                    // Project v onto edge
+                    let av = Vec3::new(v.x - a.x, v.y - a.y, v.z - a.z);
+                    let t = (av.x * edge.x + av.y * edge.y + av.z * edge.z) / edge_len2;
+                    if t <= tol || t >= 1.0 - tol {
+                        continue;
+                    }
+
+                    // Distance from v to closest point on edge
+                    let proj = Pt3::new(
+                        a.x + edge.x * t,
+                        a.y + edge.y * t,
+                        a.z + edge.z * t,
+                    );
+                    let dist2 = (v.x - proj.x) * (v.x - proj.x)
+                        + (v.y - proj.y) * (v.y - proj.y)
+                        + (v.z - proj.z) * (v.z - proj.z);
+                    if dist2 < tol2 {
+                        insertions.push((t, v));
+                    }
+                }
+            }
+
+            // Sort by t parameter and insert
+            insertions.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+            for (_, pt) in insertions {
+                new_verts.push(pt);
+            }
+        }
+
+        if new_verts.len() > n {
+            polygons[poly_idx].vertices = new_verts;
+        }
+    }
+}
+
 fn polygons_to_brep(polygons: &[CsgPolygon]) -> KernelResult<BRep> {
-    let faces: Vec<(Vec<Pt3>, Vec3)> = polygons.iter()
+    let mut polys: Vec<CsgPolygon> = polygons.iter()
         .filter(|p| p.vertices.len() >= 3)
+        .cloned()
+        .collect();
+    resolve_t_junctions(&mut polys);
+    let faces: Vec<(Vec<Pt3>, Vec3)> = polys.iter()
         .map(|p| (p.vertices.clone(), p.normal))
         .collect();
     rebuild_brep_from_faces(&faces)

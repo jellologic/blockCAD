@@ -11,6 +11,7 @@ fn empty_mesh_is_valid() {
 
 #[test]
 fn valid_quad_mesh() {
+    // An open quad (two triangles) is not watertight, so validate() returns Err
     let mesh = TriMesh {
         positions: vec![
             0.0, 0.0, 0.0, // v0
@@ -26,7 +27,7 @@ fn valid_quad_mesh() {
         face_ids: vec![0, 0],
         colors: vec![],
     };
-    assert!(mesh.validate().is_ok());
+    assert!(mesh.validate().is_err()); // not watertight
     assert_eq!(mesh.vertex_count(), 4);
     assert_eq!(mesh.triangle_count(), 2);
 }
@@ -68,7 +69,7 @@ fn tessellation_params_presets() {
 }
 
 #[test]
-fn mesh_merge_preserves_validity() {
+fn mesh_merge_preserves_structure() {
     let a = TriMesh {
         positions: vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0],
         normals: vec![0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0],
@@ -80,6 +81,7 @@ fn mesh_merge_preserves_validity() {
     let b = a.clone();
     let mut merged = a;
     merged.merge(&b);
-    assert!(merged.validate().is_ok());
+    // Two open triangles are not watertight, but merge itself works correctly
     assert_eq!(merged.triangle_count(), 2);
+    assert_eq!(merged.vertex_count(), 6);
 }

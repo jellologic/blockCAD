@@ -33,6 +33,11 @@ impl Operation for DraftOp {
 /// For each face in `face_indices`, vertices are displaced laterally
 /// proportional to their height along `pull_direction`, creating a taper
 /// at the specified angle.
+///
+/// This operates at the global vertex level: each unique vertex position that
+/// belongs to a drafted face is displaced once, and that displacement is
+/// propagated consistently to all faces sharing that vertex, maintaining
+/// watertight topology.
 pub fn draft_faces(brep: &BRep, params: &DraftParams) -> KernelResult<BRep> {
     if params.angle.abs() < 1e-12 {
         // Zero draft angle — return unchanged geometry
@@ -45,6 +50,7 @@ pub fn draft_faces(brep: &BRep, params: &DraftParams) -> KernelResult<BRep> {
 
     let mut faces = extract_face_polygons(brep)?;
 
+    // Validate face indices first
     for &face_idx in &params.face_indices {
         let fi = face_idx as usize;
         if fi >= faces.len() {
@@ -53,42 +59,85 @@ pub fn draft_faces(brep: &BRep, params: &DraftParams) -> KernelResult<BRep> {
                 value: format!("Face index {} out of range (0..{})", fi, faces.len()),
             });
         }
+    }
 
-        let (ref mut points, ref mut normal) = faces[fi];
+    // Compute the global neutral height (minimum along pull across all drafted faces)
+    let drafted_set: std::collections::HashSet<usize> =
+        params.face_indices.iter().map(|&i| i as usize).collect();
+    let global_min_h = params.face_indices.iter()
+        .flat_map(|&fi| faces[fi as usize].0.iter())
+        .map(|p| Vec3::new(p.x, p.y, p.z).dot(&pull))
+        .fold(f64::INFINITY, f64::min);
 
-        // Find the neutral edge: the vertex with minimum projection along pull direction
-        let min_h = points.iter()
-            .map(|p| Vec3::new(p.x, p.y, p.z).dot(&pull))
-            .fold(f64::INFINITY, f64::min);
+    // Compute the body centroid (across all faces) for consistent outward direction
+    let body_centroid = {
+        let mut total = Vec3::new(0.0, 0.0, 0.0);
+        let mut count = 0usize;
+        for (pts, _) in faces.iter() {
+            for p in pts {
+                total = total + Vec3::new(p.x, p.y, p.z);
+                count += 1;
+            }
+        }
+        if count > 0 { total / (count as f64) } else { total }
+    };
 
-        // Compute face centroid for outward direction reference
-        let centroid = {
-            let n = points.len() as f64;
-            let sum = points.iter().fold(Vec3::new(0.0, 0.0, 0.0), |acc, p| {
-                acc + Vec3::new(p.x, p.y, p.z)
-            });
-            sum / n
-        };
+    // Build a displacement map: for each unique vertex on drafted faces,
+    // compute the displaced position once.
+    let eps = 1e-9;
+    let mut displacement_map: Vec<(Pt3, Pt3)> = Vec::new();
 
-        // For each vertex: displace laterally by h * tan(angle)
-        for p in points.iter_mut() {
+    // Helper: check if a position already has a displacement entry
+    let find_displacement = |map: &[(Pt3, Pt3)], p: &Pt3| -> Option<Pt3> {
+        for (old, new_pt) in map {
+            let dx = p.x - old.x;
+            let dy = p.y - old.y;
+            let dz = p.z - old.z;
+            if dx * dx + dy * dy + dz * dz < eps {
+                return Some(*new_pt);
+            }
+        }
+        None
+    };
+
+    // First pass: compute displacements for all vertices on drafted faces
+    for &face_idx in &params.face_indices {
+        let fi = face_idx as usize;
+        let points = &faces[fi].0;
+        for p in points.iter() {
+            // Skip if already computed
+            if find_displacement(&displacement_map, p).is_some() {
+                continue;
+            }
+
             let pv = Vec3::new(p.x, p.y, p.z);
-            let h = pv.dot(&pull) - min_h;
-            if h.abs() < 1e-12 { continue; } // Neutral edge vertex — no displacement
+            let h = pv.dot(&pull) - global_min_h;
+            if h.abs() < 1e-12 { continue; } // Neutral edge vertex
 
-            // Lateral direction: away from centroid, projected onto plane perpendicular to pull
-            let to_centroid = centroid - pv;
+            // Lateral direction: away from body centroid, perpendicular to pull
+            let to_centroid = body_centroid - pv;
             let lateral = to_centroid - pull * to_centroid.dot(&pull);
             let lat_len = lateral.norm();
             if lat_len < 1e-12 { continue; }
-            let lateral_dir = -lateral / lat_len; // Outward from centroid
+            let lateral_dir = -lateral / lat_len; // Outward from body centroid
 
-            let displacement = lateral_dir * h * tan_angle;
-            *p = Pt3::new(p.x + displacement.x, p.y + displacement.y, p.z + displacement.z);
+            let disp = lateral_dir * h * tan_angle;
+            let new_pt = Pt3::new(p.x + disp.x, p.y + disp.y, p.z + disp.z);
+            displacement_map.push((*p, new_pt));
         }
+    }
 
-        // Recompute normal from modified vertices
-        if points.len() >= 3 {
+    // Second pass: apply displacements to ALL faces (drafted and non-drafted)
+    for (fi, (ref mut points, ref mut normal)) in faces.iter_mut().enumerate() {
+        let mut modified = false;
+        for p in points.iter_mut() {
+            if let Some(new_pt) = find_displacement(&displacement_map, p) {
+                *p = new_pt;
+                modified = true;
+            }
+        }
+        // Recompute normal if any vertices were updated
+        if modified && points.len() >= 3 {
             let e1 = points[1] - points[0];
             let e2 = points[2] - points[0];
             let new_normal = e1.cross(&e2);

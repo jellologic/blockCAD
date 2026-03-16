@@ -119,7 +119,7 @@ fn e2e_extrude_then_circular_pattern() {
     let mut tree = build_sketch_extrude_tree(5.0);
     tree.push(Feature::new("cp1".into(), "Circular Pattern".into(), FeatureKind::CircularPattern,
         FeatureParams::CircularPattern(CircularPatternParams {
-            axis_origin: Pt3::new(0.0, 0.0, 0.0),
+            axis_origin: Pt3::new(-20.0, 0.0, 0.0),
             axis_direction: Vec3::new(0.0, 0.0, 1.0),
             count: 4,
             total_angle: 2.0 * std::f64::consts::PI,

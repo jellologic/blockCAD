@@ -84,7 +84,7 @@ pub fn tessellate_face(
     }
 
     // Triangulate in 2D
-    let triangles = if inner_loops_2d.is_empty() {
+    let mut triangles = if inner_loops_2d.is_empty() {
         ear_clip::triangulate(&vertices_2d)
     } else {
         ear_clip::triangulate_with_holes(&vertices_2d, &inner_loops_2d)
@@ -99,6 +99,32 @@ pub fn tessellate_face(
     let mut all_verts_2d = vertices_2d.clone();
     for inner in &inner_loops_2d {
         all_verts_2d.extend_from_slice(inner);
+    }
+
+    // For faces with inner loops: merge coincident vertices (same 3D position)
+    // to the canonical first index, then filter degenerate triangles
+    if !inner_loops_3d.is_empty() {
+        let tol2: f64 = 1e-18;
+        let n_verts = all_verts_3d.len();
+        let mut canonical: Vec<usize> = (0..n_verts).collect();
+        for i in 1..n_verts {
+            for j in 0..i {
+                let dx = all_verts_3d[i].x - all_verts_3d[j].x;
+                let dy = all_verts_3d[i].y - all_verts_3d[j].y;
+                let dz = all_verts_3d[i].z - all_verts_3d[j].z;
+                if dx * dx + dy * dy + dz * dz < tol2 {
+                    canonical[i] = canonical[j];
+                    break;
+                }
+            }
+        }
+
+        // Remap triangle indices and filter degenerates
+        triangles = triangles
+            .into_iter()
+            .map(|tri| [canonical[tri[0]], canonical[tri[1]], canonical[tri[2]]])
+            .filter(|tri| tri[0] != tri[1] && tri[1] != tri[2] && tri[0] != tri[2])
+            .collect();
     }
 
     // Build TriMesh

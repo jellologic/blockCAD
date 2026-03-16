@@ -234,11 +234,42 @@ pub fn cut_extrude(
         }
     } else {
         // Normal cut: add inner loops to coplanar faces + reversed side walls
+        // Entry face (bottom) needs reversed winding for the inner loop
+        let cut_bottom_pts_reversed: Vec<Pt3> = cut_bottom_pts.iter().rev().copied().collect();
         for &face_id in bottom_face_ids.iter() {
-            add_inner_loop_to_face(&mut stock, face_id, &cut_bottom_pts)?;
+            add_inner_loop_to_face(&mut stock, face_id, &cut_bottom_pts_reversed)?;
         }
         for &face_id in top_face_ids.iter() {
             add_inner_loop_to_face(&mut stock, face_id, &cut_top_pts)?;
+        }
+
+        // For blind pockets cut from a stock face: add a cap at the far end.
+        // This applies when:
+        // - The entry plane IS coplanar with a stock face (inner loop added)
+        // - The far end plane is NOT coplanar with any stock face (inside the solid)
+        // This creates the "floor" of the pocket.
+        if !bottom_face_ids.is_empty() && top_face_ids.is_empty() {
+            // Pocket floor cap at the far end of the cut.
+            // The pocket void is between entry (bottom) and this cap (top).
+            // Outward normal from solid points BACK toward entry (opposite to cut direction).
+            let top_reversed: Vec<Pt3> = cut_top_pts.iter().rev().copied().collect();
+            let top_plane = Plane {
+                origin: profile.plane.origin + top_offset,
+                normal: -dir_norm,
+                u_axis: profile.plane.u_axis,
+                v_axis: profile.plane.v_axis,
+            };
+            make_planar_face(&mut stock, &top_reversed, top_plane)?;
+        }
+        // Mirror case: far end is on stock face but entry is not
+        if bottom_face_ids.is_empty() && !top_face_ids.is_empty() {
+            let bottom_plane = Plane {
+                origin: profile.plane.origin + bottom_offset,
+                normal: dir_norm,
+                u_axis: profile.plane.u_axis,
+                v_axis: profile.plane.v_axis,
+            };
+            make_planar_face(&mut stock, &cut_bottom_pts, bottom_plane)?;
         }
 
         // Add cut side walls (normals pointing INTO the cut — reversed from normal extrude)

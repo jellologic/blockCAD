@@ -26,6 +26,19 @@ impl Operation for MirrorOp {
     }
 }
 
+/// Compute a canonical key for a face polygon: sort vertex coordinates so that
+/// two faces with the same vertices (in any order) produce the same key.
+fn face_vertex_key(pts: &[Pt3], tol: f64) -> Vec<[i64; 3]> {
+    let mut quantized: Vec<[i64; 3]> = pts.iter()
+        .map(|p| {
+            let scale = 1.0 / tol;
+            [(p.x * scale).round() as i64, (p.y * scale).round() as i64, (p.z * scale).round() as i64]
+        })
+        .collect();
+    quantized.sort();
+    quantized
+}
+
 pub fn mirror_brep(brep: &BRep, params: &MirrorParams) -> KernelResult<BRep> {
     if brep.faces.is_empty() {
         return Err(KernelError::Operation {
@@ -38,15 +51,15 @@ pub fn mirror_brep(brep: &BRep, params: &MirrorParams) -> KernelResult<BRep> {
     let plane_normal = params.plane_normal.normalize();
     let plane_origin = params.plane_origin;
 
-    let mut all_faces: Vec<(Vec<Pt3>, Vec3)> = Vec::new();
+    let tol = 1e-6;
 
-    // Keep original faces
-    for (pts, normal) in &base_faces {
-        all_faces.push((pts.clone(), *normal));
-    }
+    // Build original and mirrored face lists
+    let mut original_faces: Vec<(Vec<Pt3>, Vec3)> = Vec::new();
+    let mut mirrored_faces: Vec<(Vec<Pt3>, Vec3)> = Vec::new();
 
-    // Add mirrored faces
     for (pts, normal) in &base_faces {
+        original_faces.push((pts.clone(), *normal));
+
         let mirrored_pts: Vec<Pt3> = pts.iter()
             .map(|p| {
                 let d = Vec3::new(p.x - plane_origin.x, p.y - plane_origin.y, p.z - plane_origin.z);
@@ -70,7 +83,42 @@ pub fn mirror_brep(brep: &BRep, params: &MirrorParams) -> KernelResult<BRep> {
             normal.z - 2.0 * d * plane_normal.z,
         );
 
-        all_faces.push((mirrored_pts_reversed, mirrored_normal));
+        mirrored_faces.push((mirrored_pts_reversed, mirrored_normal));
+    }
+
+    // Detect coincident face pairs (original face i and mirrored face j share
+    // the same vertices and have opposite normals). Both faces in such a pair
+    // are internal and must be removed for a watertight result.
+    let orig_keys: Vec<_> = original_faces.iter().map(|(pts, _)| face_vertex_key(pts, tol)).collect();
+    let mirr_keys: Vec<_> = mirrored_faces.iter().map(|(pts, _)| face_vertex_key(pts, tol)).collect();
+
+    let mut orig_remove = vec![false; original_faces.len()];
+    let mut mirr_remove = vec![false; mirrored_faces.len()];
+
+    for (i, ok) in orig_keys.iter().enumerate() {
+        for (j, mk) in mirr_keys.iter().enumerate() {
+            if ok == mk && !orig_remove[i] && !mirr_remove[j] {
+                // Check normals are opposite
+                let n1 = original_faces[i].1;
+                let n2 = mirrored_faces[j].1;
+                if (n1 + n2).norm() < tol {
+                    orig_remove[i] = true;
+                    mirr_remove[j] = true;
+                }
+            }
+        }
+    }
+
+    let mut all_faces: Vec<(Vec<Pt3>, Vec3)> = Vec::new();
+    for (i, face) in original_faces.into_iter().enumerate() {
+        if !orig_remove[i] {
+            all_faces.push(face);
+        }
+    }
+    for (j, face) in mirrored_faces.into_iter().enumerate() {
+        if !mirr_remove[j] {
+            all_faces.push(face);
+        }
     }
 
     rebuild_brep_from_faces(&all_faces)

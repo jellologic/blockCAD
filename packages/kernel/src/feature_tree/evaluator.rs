@@ -496,6 +496,28 @@ pub fn evaluate(tree: &mut FeatureTree) -> KernelResult<BRep> {
                 tree.features_mut()[i].state = FeatureState::Evaluated;
             }
 
+            FeatureKind::Draft => {
+                let params = match &tree.features()[i].params {
+                    FeatureParams::Draft(p) => p.clone(),
+                    _ => {
+                        tree.features_mut()[i].state = FeatureState::Failed;
+                        return Err(KernelError::Operation {
+                            op: "evaluate".into(),
+                            detail: "Draft feature has wrong params type".into(),
+                        });
+                    }
+                };
+                if matches!(current_brep.body, Body::Empty) {
+                    tree.features_mut()[i].state = FeatureState::Failed;
+                    return Err(KernelError::Operation {
+                        op: "evaluate".into(),
+                        detail: "Cannot draft: no existing geometry".into(),
+                    });
+                }
+                current_brep = crate::operations::draft::draft_faces(&current_brep, &params)?;
+                tree.features_mut()[i].state = FeatureState::Evaluated;
+            }
+
             FeatureKind::DatumPlane => {
                 let params = match &tree.features()[i].params {
                     FeatureParams::DatumPlane(p) => p.clone(),

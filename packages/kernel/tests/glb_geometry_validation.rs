@@ -372,11 +372,12 @@ fn glb_linear_pattern() {
 
 #[test]
 fn glb_circular_pattern() {
-    let mut tree = build_box_tree(10.0, 5.0, 5.0);
+    // Use a small offset box (2x2x5) with axis far away to avoid self-intersection
+    let mut tree = build_box_tree(2.0, 2.0, 5.0);
     tree.push(Feature::new(
         "cp1".into(), "Circular Pattern".into(), FeatureKind::CircularPattern,
         FeatureParams::CircularPattern(CircularPatternParams {
-            axis_origin: Pt3::new(0.0, 0.0, 0.0),
+            axis_origin: Pt3::new(-10.0, 0.0, 0.0),
             axis_direction: Vec3::new(0.0, 0.0, 1.0),
             count: 4,
             total_angle: 2.0 * std::f64::consts::PI,

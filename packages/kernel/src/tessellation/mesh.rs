@@ -1,4 +1,15 @@
+use std::collections::HashMap;
+
 use crate::error::{KernelError, KernelResult};
+
+fn quantize_vertex(x: f32, y: f32, z: f32) -> [i64; 3] {
+    let scale = 1e5;
+    [
+        (x as f64 * scale).round() as i64,
+        (y as f64 * scale).round() as i64,
+        (z as f64 * scale).round() as i64,
+    ]
+}
 
 /// Triangle mesh for visualization.
 /// Uses f32 for GPU compatibility (computation stays f64 in the kernel).
@@ -31,6 +42,43 @@ impl TriMesh {
     /// Number of triangles
     pub fn triangle_count(&self) -> usize {
         self.indices.len() / 3
+    }
+
+    /// Check if the mesh is watertight (every directed edge has a matching reverse edge).
+    pub fn is_watertight(&self) -> bool {
+        if self.indices.is_empty() {
+            return true; // empty mesh is trivially watertight
+        }
+
+        // Map each vertex index to its quantized position
+        let mut vertex_key: HashMap<u32, [i64; 3]> = HashMap::new();
+        for i in 0..self.vertex_count() {
+            let x = self.positions[i * 3];
+            let y = self.positions[i * 3 + 1];
+            let z = self.positions[i * 3 + 2];
+            vertex_key.insert(i as u32, quantize_vertex(x, y, z));
+        }
+
+        // Count directed edges by quantized position
+        let mut edge_count: HashMap<([i64; 3], [i64; 3]), i32> = HashMap::new();
+        for tri in self.indices.chunks(3) {
+            let keys: Vec<[i64; 3]> = tri.iter().map(|&idx| vertex_key[&idx]).collect();
+            for e in 0..3 {
+                let a = keys[e];
+                let b = keys[(e + 1) % 3];
+                *edge_count.entry((a, b)).or_insert(0) += 1;
+            }
+        }
+
+        // Every directed edge (a, b) must have exactly one matching (b, a)
+        for (&(a, b), &count) in &edge_count {
+            let reverse = edge_count.get(&(b, a)).copied().unwrap_or(0);
+            if count != reverse {
+                return false;
+            }
+        }
+
+        true
     }
 
     /// Fix triangle winding to match per-vertex normals.
@@ -122,6 +170,10 @@ impl TriMesh {
                 )));
             }
         }
+        // Check watertightness
+        if !self.is_watertight() {
+            return Err(KernelError::Topology("Mesh is not watertight".into()));
+        }
         Ok(())
     }
 
@@ -180,9 +232,10 @@ mod tests {
     }
 
     #[test]
-    fn valid_triangle() {
+    fn single_triangle_not_watertight() {
         let mesh = simple_triangle();
-        assert!(mesh.validate().is_ok());
+        // A single triangle is not watertight (open surface)
+        assert!(mesh.validate().is_err());
         assert_eq!(mesh.vertex_count(), 3);
         assert_eq!(mesh.triangle_count(), 1);
     }

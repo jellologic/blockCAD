@@ -189,10 +189,12 @@ pub fn triangulate_with_holes(outer: &[[f64; 2]], holes: &[Vec<[f64; 2]>]) -> Ve
     let points_2d: Vec<[f64; 2]> = combined.iter().map(|(_, p)| *p).collect();
     let local_tris = triangulate(&points_2d);
 
-    // Map local triangle indices back to global indices
+    // Map local triangle indices back to global indices, filtering degenerate triangles
+    // (where two global indices are the same due to bridge vertices)
     local_tris
         .iter()
         .map(|tri| [combined[tri[0]].0, combined[tri[1]].0, combined[tri[2]].0])
+        .filter(|tri| tri[0] != tri[1] && tri[1] != tri[2] && tri[0] != tri[2])
         .collect()
 }
 

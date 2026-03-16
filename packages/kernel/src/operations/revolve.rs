@@ -169,16 +169,17 @@ pub fn revolve_profile(
             let p2 = rings[next_seg][next_edge];
             let p3 = rings[next_seg][edge];
 
-            // Compute outward normal for this quad
-            let edge1 = p1 - p0;
-            let edge2 = p3 - p0;
-            let normal = edge1.cross(&edge2).normalize();
+            // Compute normal from the first triangle of the quad to ensure
+            // consistency with fix_winding (which checks per-triangle geometric normals).
+            let e1 = p1 - p0;
+            let e2 = p2 - p0;
+            let normal = e1.cross(&e2).normalize();
 
             let side_plane = Plane {
                 origin: p0,
                 normal,
-                u_axis: edge1.normalize(),
-                v_axis: edge2.normalize(),
+                u_axis: e1.normalize(),
+                v_axis: (p3 - p0).normalize(),
             };
             make_planar_face(&mut brep, &[p0, p1, p2, p3], side_plane)?;
         }
@@ -312,6 +313,17 @@ mod tests {
 
         // 9 segments × 4 edges = 36 side faces + 2 cap faces = 38
         assert_eq!(brep.faces.len(), 38);
+    }
+
+    #[test]
+    fn test_revolve_half_watertight() {
+        let profile = square_profile();
+        let mut params = RevolveParams::full(Pt3::origin(), Vec3::new(0.0, 0.0, 1.0));
+        params.angle = PI;
+        let brep = revolve_profile(&profile, &params).unwrap();
+        let mesh = tessellate_brep(&brep, &TessellationParams::default()).unwrap();
+        assert!(mesh.is_watertight(), "Half revolve mesh should be watertight");
+        mesh.validate().unwrap();
     }
 
     #[test]
