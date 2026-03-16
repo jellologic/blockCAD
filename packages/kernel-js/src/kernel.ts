@@ -1,19 +1,19 @@
 import { KernelHandle } from "@blockCAD/kernel-wasm";
 import { parseMeshBytes, type MeshData } from "./mesh";
-import type { FeatureEntry, FeatureParams } from "./types";
+import type { FeatureEntry, FeatureParams, SketchFeatureData, RustSketchFeatureData, RustEntityStore, RustPlane, SketchPlane } from "./types";
 import { KernelError } from "./errors";
 
 /**
  * Convert plane to Rust format (snake_case).
  * Handles both frontend camelCase (uAxis/vAxis) and kernel roundtrip snake_case (u_axis/v_axis).
  */
-function transformPlane(plane: any): any {
-  if (!plane) return plane;
+function transformPlane(plane: SketchPlane | RustPlane): RustPlane {
+  const p = plane as SketchPlane & RustPlane;
   return {
-    origin: plane.origin,
-    normal: plane.normal,
-    u_axis: plane.uAxis ?? plane.u_axis ?? [1, 0, 0],
-    v_axis: plane.vAxis ?? plane.v_axis ?? [0, 1, 0],
+    origin: p.origin,
+    normal: p.normal,
+    u_axis: p.uAxis ?? p.u_axis ?? [1, 0, 0],
+    v_axis: p.vAxis ?? p.v_axis ?? [0, 1, 0],
   };
 }
 
@@ -111,75 +111,85 @@ function toEntityStore(items: any[]): any {
 }
 
 /**
- * Normalize entities/constraints that may be either a flat SketchEntity2D[]
+ * Normalize entities/constraints that may be either a flat array
  * (from the frontend editor session) or an EntityStore object
  * (from a kernel roundtrip via featureList JSON).
  */
-function normalizeEntities(raw: any): any[] {
+function normalizeFromEntityStore(raw: unknown[] | RustEntityStore | undefined): unknown[] {
+  if (!raw) return [];
   if (Array.isArray(raw)) return raw;
-  // EntityStore format: { entries: [{ Occupied: { value, generation } } | "Free"], ... }
-  if (raw && Array.isArray(raw.entries)) {
-    return raw.entries
-      .filter((e: any) => e && typeof e === "object" && e.Occupied)
-      .map((e: any) => e.Occupied.value);
+  const store = raw as RustEntityStore;
+  if (store && Array.isArray(store.entries)) {
+    return store.entries
+      .filter((e): e is { Occupied: { generation: number; value: unknown } } =>
+        typeof e === "object" && e !== null && "Occupied" in e
+      )
+      .map((e) => e.Occupied.value);
   }
   return [];
 }
 
-/**
- * Detect if data is already in Rust serialization format (from kernel roundtrip).
- * Entities: { Point: {...} } vs frontend { type: "point", ... }
- * Constraints: { kind: { Distance: {...} } } vs frontend { kind: "distance", ... }
- */
-function isRustEntityFormat(items: any[]): boolean {
+/** Rust entity format: { Point: {...} } vs frontend { type: "point", ... } */
+function isRustEntityFormat(items: unknown[]): boolean {
   if (items.length === 0) return false;
   const first = items[0];
   if (!first || typeof first !== "object") return false;
-  return "Point" in first || "Line" in first || "Circle" in first
-    || "Arc" in first || "Spline" in first || "Ellipse" in first;
+  const obj = first as Record<string, unknown>;
+  return "Point" in obj || "Line" in obj || "Circle" in obj
+    || "Arc" in obj || "Spline" in obj || "Ellipse" in obj;
 }
 
-function isRustConstraintFormat(items: any[]): boolean {
+/** Rust constraint format: { kind: <enum>, entities: [...] } vs frontend { kind: "string", entityIds: [...] } */
+function isRustConstraintFormat(items: unknown[]): boolean {
   if (items.length === 0) return false;
   const first = items[0];
   if (!first || typeof first !== "object") return false;
-  // Rust constraints have { kind: <enum>, entities: [...], driven: bool }
-  // where kind is either a string ("Fixed") or object ({ Distance: { value } })
-  // Frontend constraints have { kind: "fixed", entityIds: [...] }
-  // The key difference: Rust has "entities" (EntityId[]), frontend has "entityIds" (string[])
-  return "entities" in first && !("entityIds" in first);
+  const obj = first as Record<string, unknown>;
+  // Rust has "entities" (EntityId[]), frontend has "entityIds" (string[])
+  return "entities" in obj && !("entityIds" in obj);
 }
 
 /**
  * Transform frontend FeatureParams to Rust FeatureParams serde format.
  * Handles both fresh frontend data AND kernel-roundtripped data (from featureList).
  */
-export function transformFeatureParams(kind: string, params: FeatureParams): any {
+/** Transform frontend FeatureParams to Rust serde format for JSON.stringify → WASM.
+ *  Handles both fresh frontend data (SketchFeatureData) and kernel-roundtripped data (RustSketchFeatureData). */
+export function transformFeatureParams(kind: string, params: FeatureParams): unknown {
   if (kind === "sketch" && params.type === "sketch") {
-    const p = params.params;
-    const entities = normalizeEntities(p.entities);
-    const constraints = normalizeEntities(p.constraints);
+    const p = params.params as SketchFeatureData | RustSketchFeatureData;
+    const entities = normalizeFromEntityStore(p.entities);
+    const constraints = normalizeFromEntityStore(p.constraints);
 
     // Check if data is already in Rust format (from kernel roundtrip via featureList)
     const entitiesAreRust = isRustEntityFormat(entities);
     const constraintsAreRust = isRustConstraintFormat(constraints);
 
-    return {
-      type: "sketch",
-      params: {
-        plane: transformPlane(p.plane),
-        entities: entitiesAreRust
-          ? toEntityStore(entities)
-          : toEntityStore(entities.map(transformSketchEntity)),
-        constraints: constraintsAreRust
-          ? toEntityStore(constraints)
-          : toEntityStore(constraints.map(transformSketchConstraint)),
-        // Preserve extra sketch data if present (from kernel roundtrip)
-        ...((p as any).block_definitions ? { block_definitions: (p as any).block_definitions } : {}),
-        ...((p as any).block_instances ? { block_instances: (p as any).block_instances } : {}),
-        ...((p as any).construction_entities ? { construction_entities: (p as any).construction_entities } : {}),
-      },
+    // Build the Rust-format sketch params for the kernel
+    const sketchParams: {
+      plane: RustPlane;
+      entities: ReturnType<typeof toEntityStore>;
+      constraints: ReturnType<typeof toEntityStore>;
+      block_definitions?: unknown[];
+      block_instances?: unknown[];
+      construction_entities?: number[];
+    } = {
+      plane: transformPlane(p.plane),
+      entities: entitiesAreRust
+        ? toEntityStore(entities)
+        : toEntityStore(entities.map(transformSketchEntity)),
+      constraints: constraintsAreRust
+        ? toEntityStore(constraints)
+        : toEntityStore(constraints.map(transformSketchConstraint)),
     };
+
+    // Preserve extra sketch data if present (from kernel roundtrip)
+    const extra = p as Partial<RustSketchFeatureData>;
+    if (extra.block_definitions) sketchParams.block_definitions = extra.block_definitions;
+    if (extra.block_instances) sketchParams.block_instances = extra.block_instances;
+    if (extra.construction_entities) sketchParams.construction_entities = extra.construction_entities;
+
+    return { type: "sketch", params: sketchParams };
   }
   // For non-sketch params, pass through as-is (extrude, revolve, etc. use snake_case already)
   return params;

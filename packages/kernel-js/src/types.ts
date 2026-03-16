@@ -136,6 +136,31 @@ export interface SketchFeatureData {
   constraints: SketchConstraint2D[];
 }
 
+/** Rust Plane format (snake_case, returned by kernel roundtrip) */
+export interface RustPlane {
+  origin: Vec3;
+  normal: Vec3;
+  u_axis: Vec3;
+  v_axis: Vec3;
+}
+
+/** Rust EntityStore serialization format */
+export interface RustEntityStore {
+  entries: Array<{ Occupied: { generation: number; value: unknown } } | string>;
+  free_list: number[];
+  len: number;
+}
+
+/** Sketch data as it comes back from kernel featureList (Rust serialization format) */
+export interface RustSketchFeatureData {
+  plane: RustPlane;
+  entities: RustEntityStore;
+  constraints: RustEntityStore;
+  block_definitions?: unknown[];
+  block_instances?: unknown[];
+  construction_entities?: number[];
+}
+
 /** Standard reference planes */
 export const FRONT_PLANE: SketchPlane = {
   origin: [0, 0, 0],

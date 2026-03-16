@@ -17,6 +17,9 @@ export type {
   SketchEntity2D,
   SketchConstraint2D,
   SketchFeatureData,
+  RustPlane,
+  RustEntityStore,
+  RustSketchFeatureData,
 } from "./types";
 export { FRONT_PLANE, TOP_PLANE, RIGHT_PLANE } from "./types";
 export { KernelError } from "./errors";
