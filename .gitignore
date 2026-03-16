@@ -53,3 +53,4 @@ test-*.png
 tmp
 temp
 packages/kernel/examples/
+.vercel

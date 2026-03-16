@@ -5,6 +5,7 @@ use crate::topology::adjacency::find_shared_edges;
 use crate::topology::body::Body;
 use crate::topology::builders::make_planar_face;
 use crate::topology::edge::Orientation;
+use crate::topology::face::FaceId;
 use crate::topology::shell::Shell;
 use crate::topology::solid::Solid;
 use crate::topology::vertex::VertexId;
@@ -34,6 +35,21 @@ impl Operation for FilletOp {
     fn name(&self) -> &'static str {
         "Fillet"
     }
+}
+
+/// At each endpoint of a filleted edge, third-party faces need their corner
+/// replaced with the full arc point sequence so that the end face shares
+/// edges with the fillet strip quads.
+struct EndpointSplit {
+    /// The original vertex position at the endpoint
+    original_pos: Pt3,
+    /// All arc points at this endpoint, from ta (face A trim) to tb (face B trim).
+    /// This is FILLET_SEGMENTS+1 points, matching the fillet strip boundary.
+    arc_points: Vec<Pt3>,
+    /// Face A id (should NOT get the split, it uses vertex_mods)
+    face_a: FaceId,
+    /// Face B id (should NOT get the split, it uses vertex_mods)
+    face_b: FaceId,
 }
 
 pub fn fillet_edges(brep: &BRep, params: &FilletParams) -> KernelResult<BRep> {
@@ -68,11 +84,14 @@ pub fn fillet_edges(brep: &BRep, params: &FilletParams) -> KernelResult<BRep> {
         }
     }
 
-    // Map VertexId → new position for vertices on the two faces adjacent to each filleted edge.
+    // Map VertexId -> new position for vertices on the two faces adjacent to each filleted edge.
     let mut vertex_mods: std::collections::HashMap<VertexId, Pt3> =
         std::collections::HashMap::new();
 
-    // Collect fillet strip quads: each selected edge produces FILLET_SEGMENTS quads
+    // Endpoint splits for third-party faces (with full arc point sequences)
+    let mut endpoint_splits: Vec<EndpointSplit> = Vec::new();
+
+    // Collect fillet strip quads
     struct FilletQuad {
         points: [Pt3; 4],
     }
@@ -102,8 +121,6 @@ pub fn fillet_edges(brep: &BRep, params: &FilletParams) -> KernelResult<BRep> {
         let mut offset_b = normal_b.cross(&edge_dir).normalize();
 
         // Offset should point INTO the solid (away from the shared edge, toward the interior).
-        // For a convex edge, the offset on face A should point AWAY from face B's normal
-        // (into the body, not out of it).
         if offset_a.dot(&normal_b) > 0.0 {
             offset_a = -offset_a;
         }
@@ -113,15 +130,13 @@ pub fn fillet_edges(brep: &BRep, params: &FilletParams) -> KernelResult<BRep> {
 
         // Compute the dihedral half-angle between the two faces
         let cos_angle = normal_a.dot(&normal_b);
-        // half_angle of the dihedral angle supplement (angle between the faces' inward directions)
         let half_angle = ((1.0 - cos_angle).max(0.0))
             .sqrt()
             .atan2(((1.0 + cos_angle).max(0.0)).sqrt());
 
-        // Trim distance on each face: r * tan(half_angle)
-        // For 90-degree edges (cos_angle = 0), half_angle = pi/4, tan = 1, so trim = r
+        // Trim distance on each face
         let trim = if half_angle.abs() < 1e-12 {
-            r // degenerate: treat as 90 degrees
+            r
         } else {
             r * half_angle.tan()
         };
@@ -133,20 +148,12 @@ pub fn fillet_edges(brep: &BRep, params: &FilletParams) -> KernelResult<BRep> {
         let tb_end = se.end + offset_b * trim;
 
         // Record vertex modifications for the two adjacent faces.
-        // vertex_a_start/end are the VertexIds on face A at the shared edge endpoints.
-        // vertex_b_start/end are the VertexIds on face B at the same geometric positions.
         vertex_mods.insert(se.vertex_a_start, ta_start);
         vertex_mods.insert(se.vertex_a_end, ta_end);
         vertex_mods.insert(se.vertex_b_start, tb_start);
         vertex_mods.insert(se.vertex_b_end, tb_end);
 
-        // Generate arc points at the start and end of the edge
-        // The arc lies in the plane perpendicular to the edge direction,
-        // going from offset_a to offset_b direction at radius r from a center point.
-        //
-        // Arc center is at: edge_point + center_offset
-        // where center_offset is along the bisector of offset_a and offset_b
-        // at distance r / cos(half_angle) from the edge
+        // Generate arc
         let bisector = (offset_a + offset_b).normalize();
         let center_dist = if half_angle.cos().abs() < 1e-12 {
             r
@@ -154,62 +161,80 @@ pub fn fillet_edges(brep: &BRep, params: &FilletParams) -> KernelResult<BRep> {
             r / half_angle.cos()
         };
 
-        // For each segment, compute the arc point by interpolating the angle
-        // from offset_a to offset_b
-        // The total sweep angle of the fillet arc = pi - dihedral_angle = 2 * half_angle
         let sweep_angle = 2.0 * half_angle;
 
-        // At each point along the edge (start and end), compute N+1 arc points.
-        // The arc lies in the plane perpendicular to edge_dir, sweeping from the
-        // trim point on face A to the trim point on face B.
-        let arc_points_at = |edge_pt: Pt3| -> Vec<Pt3> {
+        let arc_points_at = |edge_pt: Pt3, trim_a: Pt3, trim_b: Pt3| -> Vec<Pt3> {
             let center = edge_pt + bisector * center_dist;
-            let start_dir = (edge_pt + offset_a * trim - center).normalize();
+            let start_dir = (trim_a - center).normalize();
             let arc_tangent = edge_dir.cross(&start_dir).normalize();
-
-            // Exact trim points — the first/last arc points MUST match the face vertices
-            let trim_a = edge_pt + offset_a * trim;
-            let trim_b = edge_pt + offset_b * trim;
 
             let mut pts = Vec::with_capacity(FILLET_SEGMENTS + 1);
             for seg in 0..=FILLET_SEGMENTS {
                 if seg == 0 {
-                    // First point: exactly the trim point on face A
                     pts.push(trim_a);
                 } else if seg == FILLET_SEGMENTS {
-                    // Last point: exactly the trim point on face B
                     pts.push(trim_b);
                 } else {
                     let t = seg as f64 / FILLET_SEGMENTS as f64;
                     let angle = t * sweep_angle;
-                    let pt = center + start_dir * (r * angle.cos()) + arc_tangent * (r * angle.sin());
+                    let pt =
+                        center + start_dir * (r * angle.cos()) + arc_tangent * (r * angle.sin());
                     pts.push(pt);
                 }
             }
             pts
         };
 
-        let arc_start = arc_points_at(se.start);
-        let arc_end = arc_points_at(se.end);
+        let arc_start = arc_points_at(se.start, ta_start, tb_start);
+        let arc_end = arc_points_at(se.end, ta_end, tb_end);
 
-        // Create quad faces for each segment of the fillet strip
+        // Record endpoint splits with full arc point sequences
+        endpoint_splits.push(EndpointSplit {
+            original_pos: se.start,
+            arc_points: arc_start.clone(),
+            face_a: se.face_a,
+            face_b: se.face_b,
+        });
+        endpoint_splits.push(EndpointSplit {
+            original_pos: se.end,
+            arc_points: arc_end.clone(),
+            face_a: se.face_a,
+            face_b: se.face_b,
+        });
+
+        // Create quad faces for each segment of the fillet strip.
+        // The outward direction for fillet strip faces points AWAY from the solid
+        // interior (away from the offset/bisector direction).
+        let outward_dir = -(offset_a + offset_b).normalize();
         for seg in 0..FILLET_SEGMENTS {
-            fillet_quads.push(FilletQuad {
-                points: [
-                    arc_start[seg],
-                    arc_end[seg],
-                    arc_end[seg + 1],
-                    arc_start[seg + 1],
-                ],
-            });
+            let p0 = arc_start[seg];
+            let p1 = arc_end[seg];
+            let p2 = arc_end[seg + 1];
+            let p3 = arc_start[seg + 1];
+
+            let trial_e1 = (p1 - p0).normalize();
+            let trial_e2 = (p3 - p0).normalize();
+            let trial_normal = trial_e1.cross(&trial_e2);
+
+            if trial_normal.dot(&outward_dir) >= 0.0 {
+                fillet_quads.push(FilletQuad {
+                    points: [p0, p1, p2, p3],
+                });
+            } else {
+                fillet_quads.push(FilletQuad {
+                    points: [p3, p2, p1, p0],
+                });
+            }
         }
     }
 
     // Reconstruct the BRep
     let mut result = BRep::new();
 
-    // Rebuild existing faces with modified vertices
-    for (_face_id, face) in brep.faces.iter() {
+    let tol2 = 1e-9 * 1e-9;
+
+    // Rebuild existing faces with modified vertices AND endpoint splits
+    for (face_id, face) in brep.faces.iter() {
         let loop_id = face
             .outer_loop
             .ok_or_else(|| KernelError::Topology("Face has no outer loop".into()))?;
@@ -220,7 +245,9 @@ pub fn fillet_edges(brep: &BRep, params: &FilletParams) -> KernelResult<BRep> {
             .ok_or_else(|| KernelError::Topology("Face has no surface".into()))?;
         let normal = brep.surfaces[surf_idx].normal_at(0.0, 0.0)?;
 
-        let mut points: Vec<Pt3> = Vec::new();
+        // First pass: collect all original positions and their vertex IDs
+        let mut orig_positions: Vec<Pt3> = Vec::new();
+        let mut orig_vids: Vec<VertexId> = Vec::new();
         for &coedge_id in &loop_.coedges {
             let coedge = brep.coedges.get(coedge_id)?;
             let edge = brep.edges.get(coedge.edge)?;
@@ -229,12 +256,65 @@ pub fn fillet_edges(brep: &BRep, params: &FilletParams) -> KernelResult<BRep> {
                 Orientation::Reversed => edge.end,
             };
             let vertex = brep.vertices.get(start_vid)?;
-            let pos = if let Some(&new_pos) = vertex_mods.get(&start_vid) {
-                new_pos
+            orig_positions.push(vertex.point);
+            orig_vids.push(start_vid);
+        }
+
+        // Second pass: build output polygon, handling vertex_mods and splits
+        let num = orig_positions.len();
+        let mut points: Vec<Pt3> = Vec::new();
+        for i in 0..num {
+            let vid = orig_vids[i];
+            let pos = orig_positions[i];
+
+            if let Some(&new_pos) = vertex_mods.get(&vid) {
+                points.push(new_pos);
             } else {
-                vertex.point
-            };
-            points.push(pos);
+                let mut split_done = false;
+                for ep in &endpoint_splits {
+                    if face_id == ep.face_a || face_id == ep.face_b {
+                        continue;
+                    }
+                    let d = pos - ep.original_pos;
+                    if d.x * d.x + d.y * d.y + d.z * d.z < tol2 {
+                        // Determine correct winding order using adjacent vertex positions.
+                        // The previous vertex tells us which direction we approach from.
+                        let prev_pos = orig_positions[(i + num - 1) % num];
+                        let prev_actual = if let Some(&mp) = vertex_mods.get(&orig_vids[(i + num - 1) % num]) {
+                            mp
+                        } else {
+                            prev_pos
+                        };
+
+                        let first = ep.arc_points.first().unwrap();
+                        let last = ep.arc_points.last().unwrap();
+
+                        let dist_first_to_prev = {
+                            let d = *first - prev_actual;
+                            d.x * d.x + d.y * d.y + d.z * d.z
+                        };
+                        let dist_last_to_prev = {
+                            let d = *last - prev_actual;
+                            d.x * d.x + d.y * d.y + d.z * d.z
+                        };
+
+                        if dist_first_to_prev <= dist_last_to_prev {
+                            for pt in &ep.arc_points {
+                                points.push(*pt);
+                            }
+                        } else {
+                            for pt in ep.arc_points.iter().rev() {
+                                points.push(*pt);
+                            }
+                        }
+                        split_done = true;
+                        break;
+                    }
+                }
+                if !split_done {
+                    points.push(pos);
+                }
+            }
         }
 
         let origin = brep.surfaces[surf_idx].point_at(0.0, 0.0)?;
@@ -351,12 +431,12 @@ mod tests {
         let mesh = tessellate_brep(&result, &TessellationParams::default()).unwrap();
         mesh.validate().unwrap();
         assert!(mesh.triangle_count() > 0, "Fillet mesh should have triangles");
-        // Fillet should have more triangles than the original box (12 base + fillet arc triangles)
         let box_mesh = tessellate_brep(&brep, &TessellationParams::default()).unwrap();
         assert!(
             mesh.triangle_count() > box_mesh.triangle_count(),
             "Fillet mesh ({}) should have more triangles than box ({})",
-            mesh.triangle_count(), box_mesh.triangle_count()
+            mesh.triangle_count(),
+            box_mesh.triangle_count()
         );
     }
 
@@ -369,10 +449,7 @@ mod tests {
         };
         let result = fillet_edges(&brep, &params).unwrap();
         // 6 original + 3 * FILLET_SEGMENTS fillet faces
-        assert_eq!(
-            result.faces.len(),
-            6 + 3 * FILLET_SEGMENTS,
-        );
+        assert_eq!(result.faces.len(), 6 + 3 * FILLET_SEGMENTS,);
         assert!(matches!(result.body, Body::Solid(_)));
     }
 }

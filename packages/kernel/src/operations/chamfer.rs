@@ -5,6 +5,7 @@ use crate::topology::adjacency::find_shared_edges;
 use crate::topology::body::Body;
 use crate::topology::builders::make_planar_face;
 use crate::topology::edge::Orientation;
+use crate::topology::face::FaceId;
 use crate::topology::shell::Shell;
 use crate::topology::solid::Solid;
 use crate::topology::vertex::VertexId;
@@ -33,6 +34,17 @@ impl Operation for ChamferOp {
     fn name(&self) -> &'static str {
         "Chamfer"
     }
+}
+
+/// At each endpoint of a chamfered edge, third-party faces need their corner
+/// replaced with the two chamfer points to close the gap.
+struct EndpointSplit {
+    original_pos: Pt3,
+    /// Points to insert: from face-A trim point (ca) to face-B trim point (cb).
+    /// For chamfer this is [ca, cb]; for fillet it would be [ta, arc..., tb].
+    split_points: Vec<Pt3>,
+    face_a: FaceId,
+    face_b: FaceId,
 }
 
 pub fn chamfer_edges(brep: &BRep, params: &ChamferParams) -> KernelResult<BRep> {
@@ -73,6 +85,9 @@ pub fn chamfer_edges(brep: &BRep, params: &ChamferParams) -> KernelResult<BRep> 
     let mut vertex_mods: std::collections::HashMap<VertexId, Pt3> =
         std::collections::HashMap::new();
 
+    // Endpoint splits for third-party faces
+    let mut endpoint_splits: Vec<EndpointSplit> = Vec::new();
+
     // Collect chamfer face data
     struct ChamferFace {
         points: [Pt3; 4],
@@ -103,7 +118,6 @@ pub fn chamfer_edges(brep: &BRep, params: &ChamferParams) -> KernelResult<BRep> 
         let mut offset_b = normal_b.cross(&edge_dir).normalize();
 
         // Offset should point INTO the solid (away from the shared edge, toward the interior).
-        // For a convex edge, the offset on face A should point AWAY from face B's normal.
         if offset_a.dot(&normal_b) > 0.0 {
             offset_a = -offset_a;
         }
@@ -123,19 +137,45 @@ pub fn chamfer_edges(brep: &BRep, params: &ChamferParams) -> KernelResult<BRep> 
         vertex_mods.insert(se.vertex_b_start, cb_start);
         vertex_mods.insert(se.vertex_b_end, cb_end);
 
-        // Record chamfer face (winding: ca_start -> ca_end -> cb_end -> cb_start)
-        chamfer_faces.push(ChamferFace {
-            points: [ca_start, ca_end, cb_end, cb_start],
+        // Record endpoint splits for third-party faces
+        endpoint_splits.push(EndpointSplit {
+            original_pos: se.start,
+            split_points: vec![ca_start, cb_start],
+            face_a: se.face_a,
+            face_b: se.face_b,
         });
+        endpoint_splits.push(EndpointSplit {
+            original_pos: se.end,
+            split_points: vec![ca_end, cb_end],
+            face_a: se.face_a,
+            face_b: se.face_b,
+        });
+
+        // Record chamfer face with correct outward-pointing normal.
+        // The offsets point INTO the solid, so the chamfer face normal should
+        // point AWAY from offset directions (toward the removed corner).
+        let outward_dir = -(offset_a + offset_b).normalize();
+        let trial_e1 = (ca_end - ca_start).normalize();
+        let trial_e2 = (cb_start - ca_start).normalize();
+        let trial_normal = trial_e1.cross(&trial_e2);
+        if trial_normal.dot(&outward_dir) >= 0.0 {
+            chamfer_faces.push(ChamferFace {
+                points: [ca_start, ca_end, cb_end, cb_start],
+            });
+        } else {
+            chamfer_faces.push(ChamferFace {
+                points: [cb_start, cb_end, ca_end, ca_start],
+            });
+        }
     }
 
-    // Reconstruct the BRep:
-    // 1. Rebuild all original faces with modified vertex positions
-    // 2. Add chamfer faces
+    // Reconstruct the BRep
     let mut result = BRep::new();
 
-    // Rebuild existing faces with modified vertices
-    for (_face_id, face) in brep.faces.iter() {
+    let tol2 = 1e-9 * 1e-9;
+
+    // Rebuild existing faces with modified vertices AND endpoint splits
+    for (face_id, face) in brep.faces.iter() {
         let loop_id = face
             .outer_loop
             .ok_or_else(|| KernelError::Topology("Face has no outer loop".into()))?;
@@ -146,8 +186,9 @@ pub fn chamfer_edges(brep: &BRep, params: &ChamferParams) -> KernelResult<BRep> 
             .ok_or_else(|| KernelError::Topology("Face has no surface".into()))?;
         let normal = brep.surfaces[surf_idx].normal_at(0.0, 0.0)?;
 
-        // Collect face vertex positions, applying modifications
-        let mut points: Vec<Pt3> = Vec::new();
+        // First pass: collect all original positions and their vertex IDs
+        let mut orig_positions: Vec<Pt3> = Vec::new();
+        let mut orig_vids: Vec<VertexId> = Vec::new();
         for &coedge_id in &loop_.coedges {
             let coedge = brep.coedges.get(coedge_id)?;
             let edge = brep.edges.get(coedge.edge)?;
@@ -156,12 +197,70 @@ pub fn chamfer_edges(brep: &BRep, params: &ChamferParams) -> KernelResult<BRep> 
                 Orientation::Reversed => edge.end,
             };
             let vertex = brep.vertices.get(start_vid)?;
-            let pos = if let Some(&new_pos) = vertex_mods.get(&start_vid) {
-                new_pos
+            orig_positions.push(vertex.point);
+            orig_vids.push(start_vid);
+        }
+
+        // Second pass: build output polygon, handling vertex_mods and splits
+        let n = orig_positions.len();
+        let mut points: Vec<Pt3> = Vec::new();
+        for i in 0..n {
+            let vid = orig_vids[i];
+            let pos = orig_positions[i];
+
+            if let Some(&new_pos) = vertex_mods.get(&vid) {
+                points.push(new_pos);
             } else {
-                vertex.point
-            };
-            points.push(pos);
+                // Check if this vertex position matches an endpoint that needs splitting
+                let mut split_done = false;
+                for ep in &endpoint_splits {
+                    if face_id == ep.face_a || face_id == ep.face_b {
+                        continue;
+                    }
+                    let d = pos - ep.original_pos;
+                    if d.x * d.x + d.y * d.y + d.z * d.z < tol2 {
+                        // Determine correct winding order using adjacent vertices.
+                        // The previous vertex in the polygon tells us which direction
+                        // we're coming from, and the next vertex tells us where we go.
+                        // The split point closest to the previous vertex should come first.
+                        let prev_pos = orig_positions[(i + n - 1) % n];
+                        let prev_actual = if let Some(&mp) = vertex_mods.get(&orig_vids[(i + n - 1) % n]) {
+                            mp
+                        } else {
+                            prev_pos
+                        };
+
+                        let first = ep.split_points.first().unwrap();
+                        let last = ep.split_points.last().unwrap();
+
+                        let dist_first_to_prev = {
+                            let d = *first - prev_actual;
+                            d.x * d.x + d.y * d.y + d.z * d.z
+                        };
+                        let dist_last_to_prev = {
+                            let d = *last - prev_actual;
+                            d.x * d.x + d.y * d.y + d.z * d.z
+                        };
+
+                        if dist_first_to_prev <= dist_last_to_prev {
+                            // first (ca) is closer to prev -> forward order
+                            for pt in &ep.split_points {
+                                points.push(*pt);
+                            }
+                        } else {
+                            // last (cb) is closer to prev -> reverse order
+                            for pt in ep.split_points.iter().rev() {
+                                points.push(*pt);
+                            }
+                        }
+                        split_done = true;
+                        break;
+                    }
+                }
+                if !split_done {
+                    points.push(pos);
+                }
+            }
         }
 
         // Get origin from original surface
@@ -267,7 +366,10 @@ mod tests {
         let result = chamfer_edges(&brep, &params).unwrap();
         let mesh = tessellate_brep(&result, &TessellationParams::default()).unwrap();
         mesh.validate().unwrap();
-        assert!(mesh.triangle_count() > 0, "Chamfer mesh should have triangles");
+        assert!(
+            mesh.triangle_count() > 0,
+            "Chamfer mesh should have triangles"
+        );
     }
 
     #[test]
@@ -296,4 +398,5 @@ mod tests {
         assert_eq!(result.faces.len(), 7);
         assert!(matches!(result.body, Body::Solid(_)));
     }
+
 }
