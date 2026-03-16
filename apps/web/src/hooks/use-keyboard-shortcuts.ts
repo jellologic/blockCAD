@@ -124,6 +124,46 @@ export function useKeyboardShortcuts() {
           }
           break;
 
+        case "t":
+        case "T":
+          if (mode === "sketch" && !e.ctrlKey && !e.metaKey) {
+            setSketchTool("trim");
+            e.preventDefault();
+          }
+          break;
+
+        case "o":
+        case "O":
+          if (mode === "sketch" && !e.ctrlKey && !e.metaKey) {
+            setSketchTool("offset");
+            e.preventDefault();
+          }
+          break;
+
+        case "p":
+        case "P":
+          if (mode === "sketch" && !e.ctrlKey && !e.metaKey) {
+            setSketchTool("polygon");
+            e.preventDefault();
+          }
+          break;
+
+        case "i":
+        case "I":
+          if (mode === "sketch" && !e.ctrlKey && !e.metaKey) {
+            setSketchTool("ellipse");
+            e.preventDefault();
+          }
+          break;
+
+        case "n":
+        case "N":
+          if (mode === "sketch" && !e.ctrlKey && !e.metaKey) {
+            setSketchTool("slot");
+            e.preventDefault();
+          }
+          break;
+
         case "e":
         case "E":
           if (!activeOperation && mode !== "sketch" && !e.ctrlKey && !e.metaKey) {
@@ -158,7 +198,10 @@ export function useKeyboardShortcuts() {
 
         case "f":
         case "F":
-          if (!activeOperation && mode !== "sketch" && !e.ctrlKey && !e.metaKey) {
+          if (mode === "sketch" && !e.ctrlKey && !e.metaKey) {
+            setSketchTool("sketch-fillet");
+            e.preventDefault();
+          } else if (!activeOperation && mode !== "sketch" && !e.ctrlKey && !e.metaKey) {
             setMode(mode === "select-face" ? "view" : "select-face");
             e.preventDefault();
           }
@@ -174,7 +217,10 @@ export function useKeyboardShortcuts() {
 
         case "h":
         case "H":
-          if (!activeOperation && mode !== "sketch" && !e.ctrlKey && !e.metaKey) {
+          if (mode === "sketch" && !e.ctrlKey && !e.metaKey) {
+            setSketchTool("sketch-chamfer");
+            e.preventDefault();
+          } else if (!activeOperation && mode !== "sketch" && !e.ctrlKey && !e.metaKey) {
             startOperation("chamfer");
             e.preventDefault();
           }

@@ -29,6 +29,12 @@ pub enum ConstraintKind {
 
     // Equality
     Equal,
+
+    // Advanced geometric constraints
+    /// Two arcs/circles share the same center and radius.
+    Coradial,
+    /// A point lies on a line or arc/circle curve.
+    PointOnCurve,
 }
 
 /// A constraint applied to one or more sketch entities.

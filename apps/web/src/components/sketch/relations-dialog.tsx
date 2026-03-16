@@ -10,6 +10,10 @@ import {
   MoveHorizontal,
   MoveVertical,
   X,
+  Lock,
+  FlipHorizontal,
+  Crosshair,
+  CircleDot,
 } from "lucide-react";
 
 interface RelationDef {
@@ -25,9 +29,10 @@ type EntityRequirement =
   | { lines: number }
   | { points: 1; lines: 1 }
   | { lines: 2 }
+  | { circles: number }
   | { any: number };
 
-const RELATIONS: RelationDef[] = [
+export const RELATIONS: RelationDef[] = [
   {
     kind: "coincident",
     label: "Coincident",
@@ -76,9 +81,39 @@ const RELATIONS: RelationDef[] = [
     icon: <ArrowLeftRight className="h-3.5 w-3.5" />,
     requires: { points: 3 },
   },
+  {
+    kind: "tangent",
+    label: "Tangent",
+    icon: <Circle className="h-3.5 w-3.5" />,
+    requires: { any: 2 },
+  },
+  {
+    kind: "symmetric",
+    label: "Symmetric",
+    icon: <FlipHorizontal className="h-3.5 w-3.5" />,
+    requires: { points: 2 },
+  },
+  {
+    kind: "coradial",
+    label: "Coradial",
+    icon: <CircleDot className="h-3.5 w-3.5" />,
+    requires: { circles: 2 },
+  },
+  {
+    kind: "point_on_curve",
+    label: "On Curve",
+    icon: <Crosshair className="h-3.5 w-3.5" />,
+    requires: { any: 2 },
+  },
+  {
+    kind: "fixed",
+    label: "Fixed",
+    icon: <Lock className="h-3.5 w-3.5" />,
+    requires: { points: 1 },
+  },
 ];
 
-function countSelectedTypes(
+export function countSelectedTypes(
   selectedIds: string[],
   entities: SketchEntity2D[]
 ): { points: number; lines: number; circles: number; arcs: number } {
@@ -107,15 +142,16 @@ function countSelectedTypes(
   return { points, lines, circles, arcs };
 }
 
-function isApplicable(
+export function isApplicable(
   req: EntityRequirement,
   counts: { points: number; lines: number; circles: number; arcs: number }
 ): boolean {
   if ("points" in req && "lines" in req) {
-    return counts.points >= req.points && counts.lines >= (req as any).lines;
+    return counts.points >= req.points && counts.lines >= (req as { points: number; lines: number }).lines;
   }
   if ("points" in req) return counts.points >= req.points;
   if ("lines" in req) return counts.lines >= req.lines;
+  if ("circles" in req) return counts.circles >= req.circles;
   if ("any" in req) {
     return counts.points + counts.lines + counts.circles + counts.arcs >= req.any;
   }

@@ -68,3 +68,65 @@ test.describe("Keyboard shortcuts", () => {
     );
   });
 });
+
+test.describe("Sketch mode keyboard shortcuts", () => {
+  test("T activates trim tool in sketch mode", async ({ page }) => {
+    await waitForEditor(page);
+    await page.locator("body").click();
+    await page.keyboard.press("s");
+    await expect(
+      page.locator('[data-testid="sketch-confirm"]')
+    ).toBeVisible({ timeout: 10000 });
+
+    await page.keyboard.press("t");
+    await expect(page.locator('[data-testid="tool-trim"]')).toBeVisible();
+  });
+
+  test("P activates polygon tool in sketch mode", async ({ page }) => {
+    await waitForEditor(page);
+    await page.locator("body").click();
+    await page.keyboard.press("s");
+    await expect(
+      page.locator('[data-testid="sketch-confirm"]')
+    ).toBeVisible({ timeout: 10000 });
+
+    await page.keyboard.press("p");
+    await expect(page.locator('[data-testid="tool-polygon"]')).toBeVisible();
+  });
+
+  test("O activates offset tool in sketch mode", async ({ page }) => {
+    await waitForEditor(page);
+    await page.locator("body").click();
+    await page.keyboard.press("s");
+    await expect(
+      page.locator('[data-testid="sketch-confirm"]')
+    ).toBeVisible({ timeout: 10000 });
+
+    await page.keyboard.press("o");
+    await expect(page.locator('[data-testid="tool-offset"]')).toBeVisible();
+  });
+
+  test("F activates fillet in sketch mode", async ({ page }) => {
+    await waitForEditor(page);
+    await page.locator("body").click();
+    await page.keyboard.press("s");
+    await expect(
+      page.locator('[data-testid="sketch-confirm"]')
+    ).toBeVisible({ timeout: 10000 });
+
+    await page.keyboard.press("f");
+    await expect(page.locator('[data-testid="tool-sketch-fillet"]')).toBeVisible();
+  });
+
+  test("H activates chamfer in sketch mode", async ({ page }) => {
+    await waitForEditor(page);
+    await page.locator("body").click();
+    await page.keyboard.press("s");
+    await expect(
+      page.locator('[data-testid="sketch-confirm"]')
+    ).toBeVisible({ timeout: 10000 });
+
+    await page.keyboard.press("h");
+    await expect(page.locator('[data-testid="tool-sketch-chamfer"]')).toBeVisible();
+  });
+});

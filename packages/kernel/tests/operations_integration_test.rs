@@ -232,3 +232,32 @@ fn e2e_extrude_then_shell() {
     mesh.validate().unwrap();
     assert!(mesh.triangle_count() > 0);
 }
+
+// --- CIRCLE PROFILE EXTRUDE (cylinder) ---
+
+fn make_circle_sketch() -> Sketch {
+    let mut sketch = Sketch::new(Plane::xy(0.0));
+    let center = sketch.add_entity(SketchEntity::Point { position: Pt2::new(0.0, 0.0) });
+    sketch.add_entity(SketchEntity::Circle { center, radius: 5.0 });
+    sketch.add_constraint(Constraint::new(ConstraintKind::Fixed, vec![center]));
+    sketch
+}
+
+#[test]
+fn e2e_circle_sketch_extrude_tessellate() {
+    let mut tree = FeatureTree::new();
+    tree.push(Feature::new("s1".into(), "Circle Sketch".into(), FeatureKind::Sketch, FeatureParams::Placeholder));
+    tree.sketches.insert(0, make_circle_sketch());
+    tree.push(Feature::new("e1".into(), "Extrude".into(), FeatureKind::Extrude,
+        FeatureParams::Extrude(ExtrudeParams::blind(Vec3::new(0.0, 0.0, 1.0), 10.0))));
+
+    let brep = evaluate(&mut tree).unwrap();
+    assert!(matches!(brep.body, Body::Solid(_)));
+    // A cylinder has 3 faces: top, bottom, side
+    assert!(brep.faces.len() >= 3, "Cylinder should have at least 3 faces, got {}", brep.faces.len());
+
+    let mesh = tessellate_brep(&brep, &TessellationParams::default()).unwrap();
+    mesh.validate().unwrap();
+    assert!(mesh.triangle_count() > 0, "Mesh should have triangles");
+    assert!(mesh.vertex_count() > 0, "Mesh should have vertices");
+}

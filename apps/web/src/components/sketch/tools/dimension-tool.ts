@@ -33,6 +33,14 @@ function findNearestEntity(
         const dy = clickPos.y - centerPt.y;
         dist = Math.abs(Math.sqrt(dx * dx + dy * dy) - entity.radius);
       }
+    } else if (entity.type === "arc") {
+      const centerPt = getPointPos(entity.centerId, entities);
+      if (centerPt) {
+        // Distance to arc center
+        const dx = clickPos.x - centerPt.x;
+        const dy = clickPos.y - centerPt.y;
+        dist = Math.abs(Math.sqrt(dx * dx + dy * dy) - entity.radius);
+      }
     } else if (entity.type === "point") {
       dist = Math.sqrt(
         (clickPos.x - entity.position.x) ** 2 +
@@ -77,6 +85,12 @@ export function handleDimensionClick(clickPos: SketchPoint2D): void {
       });
     } else if (hit.entity.type === "circle") {
       // Circle → radius dimension
+      store.setDimensionPending({
+        entityIds: [hit.entity.id],
+        kind: "radius",
+      });
+    } else if (hit.entity.type === "arc") {
+      // Arc → radius dimension (use the arc entity itself)
       store.setDimensionPending({
         entityIds: [hit.entity.id],
         kind: "radius",

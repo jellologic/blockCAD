@@ -657,6 +657,164 @@ impl Equation for SymmetricPerpendicularEquation {
     }
 }
 
+/// Point-on-line constraint: point (px, py) lies on line from (ax, ay) to (bx, by).
+/// Uses the cross product form: (bx-ax)*(py-ay) - (by-ay)*(px-ax) = 0
+/// This is equivalent to CollinearEquation but named for clarity.
+pub type PointOnLineEquation = CollinearEquation;
+
+/// Point-on-circle constraint: distance from point to center equals radius.
+/// (px - cx)² + (py - cy)² - r² = 0
+#[derive(Debug)]
+pub struct PointOnCircleEquation {
+    pub px: VariableId,
+    pub py: VariableId,
+    pub cx: VariableId,
+    pub cy: VariableId,
+    pub r: VariableId,
+    ids: Vec<VariableId>,
+}
+
+impl PointOnCircleEquation {
+    pub fn new(
+        px: VariableId, py: VariableId,
+        cx: VariableId, cy: VariableId,
+        r: VariableId,
+    ) -> Self {
+        Self {
+            px, py, cx, cy, r,
+            ids: vec![px, py, cx, cy, r],
+        }
+    }
+}
+
+impl Equation for PointOnCircleEquation {
+    fn eval(&self, vars: &VariableStore) -> f64 {
+        let dx = vars.value(self.px) - vars.value(self.cx);
+        let dy = vars.value(self.py) - vars.value(self.cy);
+        let r = vars.value(self.r);
+        dx * dx + dy * dy - r * r
+    }
+
+    fn jacobian_row(&self, vars: &VariableStore) -> Vec<(VariableId, f64)> {
+        let dx = vars.value(self.px) - vars.value(self.cx);
+        let dy = vars.value(self.py) - vars.value(self.cy);
+        let r = vars.value(self.r);
+        vec![
+            (self.px, 2.0 * dx),
+            (self.py, 2.0 * dy),
+            (self.cx, -2.0 * dx),
+            (self.cy, -2.0 * dy),
+            (self.r, -2.0 * r),
+        ]
+    }
+
+    fn variable_ids(&self) -> &[VariableId] {
+        &self.ids
+    }
+}
+
+/// Tangent constraint between a line and a circle:
+/// The perpendicular distance from the circle center to the line equals the radius.
+///
+/// Given line (ax,ay)→(bx,by) and circle center (cx,cy) radius r:
+/// cross = (bx-ax)*(cy-ay) - (by-ay)*(cx-ax)
+/// len2 = (bx-ax)² + (by-ay)²
+/// f = cross² - r² * len2 = 0
+///
+/// This avoids sqrt while enforcing |cross|/sqrt(len2) = r.
+#[derive(Debug)]
+pub struct TangentLineCircleEquation {
+    pub ax: VariableId,
+    pub ay: VariableId,
+    pub bx: VariableId,
+    pub by: VariableId,
+    pub cx: VariableId,
+    pub cy: VariableId,
+    pub r: VariableId,
+    ids: Vec<VariableId>,
+}
+
+impl TangentLineCircleEquation {
+    pub fn new(
+        ax: VariableId, ay: VariableId,
+        bx: VariableId, by: VariableId,
+        cx: VariableId, cy: VariableId,
+        r: VariableId,
+    ) -> Self {
+        Self {
+            ax, ay, bx, by, cx, cy, r,
+            ids: vec![ax, ay, bx, by, cx, cy, r],
+        }
+    }
+}
+
+impl Equation for TangentLineCircleEquation {
+    fn eval(&self, vars: &VariableStore) -> f64 {
+        let dx = vars.value(self.bx) - vars.value(self.ax);
+        let dy = vars.value(self.by) - vars.value(self.ay);
+        let acx = vars.value(self.cx) - vars.value(self.ax);
+        let acy = vars.value(self.cy) - vars.value(self.ay);
+        let cross = dx * acy - dy * acx;
+        let len2 = dx * dx + dy * dy;
+        let r = vars.value(self.r);
+        cross * cross - r * r * len2
+    }
+
+    fn jacobian_row(&self, vars: &VariableStore) -> Vec<(VariableId, f64)> {
+        let dx = vars.value(self.bx) - vars.value(self.ax);
+        let dy = vars.value(self.by) - vars.value(self.ay);
+        let acx = vars.value(self.cx) - vars.value(self.ax);
+        let acy = vars.value(self.cy) - vars.value(self.ay);
+        let cross = dx * acy - dy * acx;
+        let len2 = dx * dx + dy * dy;
+        let r = vars.value(self.r);
+        let r2 = r * r;
+
+        // f = cross² - r²·len2
+        // cross = dx·acy - dy·acx
+        // len2 = dx² + dy²
+        //
+        // dcross/dax = -acy + 0·acx ... let's do it carefully:
+        // dx = bx-ax, dy = by-ay, acx = cx-ax, acy = cy-ay
+        //
+        // dcross/dax = d/dax[ (bx-ax)(cy-ay) - (by-ay)(cx-ax) ]
+        //            = -(cy-ay) - (-(by-ay)) = -acy + dy
+        // dcross/day = (bx-ax)·(-1) - (-1)·(cx-ax) = -dx + acx
+        // dcross/dbx = acy
+        // dcross/dby = -acx
+        // dcross/dcx = -dy   [d/dcx of -(by-ay)(cx-ax) = -dy]
+        // dcross/dcy = dx    [d/dcy of (bx-ax)(cy-ay) = dx]
+        //
+        // dlen2/dax = -2·dx
+        // dlen2/day = -2·dy
+        // dlen2/dbx = 2·dx
+        // dlen2/dby = 2·dy
+        //
+        // df/dvar = 2·cross·dcross/dvar - r²·dlen2/dvar
+
+        let dc_dax = -acy + dy;
+        let dc_day = -dx + acx;
+        let dc_dbx = acy;
+        let dc_dby = -acx;
+        let dc_dcx = -dy;
+        let dc_dcy = dx;
+
+        vec![
+            (self.ax, 2.0 * cross * dc_dax - r2 * (-2.0 * dx)),
+            (self.ay, 2.0 * cross * dc_day - r2 * (-2.0 * dy)),
+            (self.bx, 2.0 * cross * dc_dbx - r2 * (2.0 * dx)),
+            (self.by, 2.0 * cross * dc_dby - r2 * (2.0 * dy)),
+            (self.cx, 2.0 * cross * dc_dcx),
+            (self.cy, 2.0 * cross * dc_dcy),
+            (self.r, -2.0 * r * len2),
+        ]
+    }
+
+    fn variable_ids(&self) -> &[VariableId] {
+        &self.ids
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -881,5 +1039,96 @@ mod tests {
             ids[0], ids[1], ids[2], ids[3], ids[4], ids[5], ids[6], ids[7],
         );
         assert!(eq.eval(&store).abs() < 1e-9);
+    }
+
+    #[test]
+    fn point_on_circle_satisfied() {
+        // Point at (3,4), circle center (0,0), radius 5
+        let (store, ids) = make_store(&[3.0, 4.0, 0.0, 0.0, 5.0]);
+        let eq = PointOnCircleEquation::new(ids[0], ids[1], ids[2], ids[3], ids[4]);
+        assert!(eq.eval(&store).abs() < 1e-9);
+    }
+
+    #[test]
+    fn point_on_circle_not_satisfied() {
+        // Point at (1,0), circle center (0,0), radius 5
+        let (store, ids) = make_store(&[1.0, 0.0, 0.0, 0.0, 5.0]);
+        let eq = PointOnCircleEquation::new(ids[0], ids[1], ids[2], ids[3], ids[4]);
+        assert!((eq.eval(&store) - (1.0 - 25.0)).abs() < 1e-9); // 1 - 25 = -24
+    }
+
+    #[test]
+    fn point_on_circle_jacobian() {
+        let (store, ids) = make_store(&[3.0, 4.0, 1.0, 1.0, 5.0]);
+        let eq = PointOnCircleEquation::new(ids[0], ids[1], ids[2], ids[3], ids[4]);
+        let jac = eq.jacobian_row(&store);
+
+        let eps = 1e-7;
+        for &(var_id, analytic) in &jac {
+            let mut store_plus = VariableStore::new();
+            for (i, &v) in [3.0, 4.0, 1.0, 1.0, 5.0].iter().enumerate() {
+                let val = if i == var_id.index() as usize { v + eps } else { v };
+                store_plus.add(super::super::variable::Variable::new(val));
+            }
+            let f_plus = eq.eval(&store_plus);
+            let f_base = eq.eval(&store);
+            let numerical = (f_plus - f_base) / eps;
+            assert!(
+                (analytic - numerical).abs() < 1e-5,
+                "Jacobian mismatch for var {:?}: analytic={}, numerical={}",
+                var_id, analytic, numerical
+            );
+        }
+    }
+
+    #[test]
+    fn tangent_line_circle_satisfied() {
+        // Horizontal line y=0 from (0,0) to (10,0), circle center (5,3) radius 3
+        // Distance from (5,3) to the line y=0 is 3 = radius → tangent
+        let (store, ids) = make_store(&[0.0, 0.0, 10.0, 0.0, 5.0, 3.0, 3.0]);
+        let eq = TangentLineCircleEquation::new(
+            ids[0], ids[1], ids[2], ids[3], ids[4], ids[5], ids[6],
+        );
+        assert!(eq.eval(&store).abs() < 1e-9);
+    }
+
+    #[test]
+    fn tangent_line_circle_not_satisfied() {
+        // Horizontal line y=0, circle center (5,5) radius 3
+        // Distance = 5, not 3
+        let (store, ids) = make_store(&[0.0, 0.0, 10.0, 0.0, 5.0, 5.0, 3.0]);
+        let eq = TangentLineCircleEquation::new(
+            ids[0], ids[1], ids[2], ids[3], ids[4], ids[5], ids[6],
+        );
+        // cross = 10*5 - 0*5 = 50, len2 = 100, r=3
+        // f = 50² - 9*100 = 2500 - 900 = 1600
+        assert!((eq.eval(&store) - 1600.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn tangent_line_circle_jacobian() {
+        let vals = [1.0, 2.0, 5.0, 2.0, 3.0, 5.0, 3.0];
+        let (store, ids) = make_store(&vals);
+        let eq = TangentLineCircleEquation::new(
+            ids[0], ids[1], ids[2], ids[3], ids[4], ids[5], ids[6],
+        );
+        let jac = eq.jacobian_row(&store);
+
+        let eps = 1e-7;
+        for &(var_id, analytic) in &jac {
+            let mut store_plus = VariableStore::new();
+            for (i, &v) in vals.iter().enumerate() {
+                let val = if i == var_id.index() as usize { v + eps } else { v };
+                store_plus.add(super::super::variable::Variable::new(val));
+            }
+            let f_plus = eq.eval(&store_plus);
+            let f_base = eq.eval(&store);
+            let numerical = (f_plus - f_base) / eps;
+            assert!(
+                (analytic - numerical).abs() < 1e-4,
+                "Tangent jacobian mismatch for var {:?}: analytic={}, numerical={}",
+                var_id, analytic, numerical
+            );
+        }
     }
 }

@@ -4,8 +4,8 @@ import {
   Minus, Square, Lock, MoveHorizontal, MoveVertical, Ruler, Spline,
   Eye, Layers, Network, Maximize2, BoxSelect, Pencil, Check, X, RulerIcon,
   Download, Plus, Link, FileText, Combine,
-  Scissors, ArrowUpRight, Copy, FlipHorizontal, Construction,
-  Hexagon, Disc,
+  Scissors, ArrowUpRight, Copy, FlipHorizontal,
+  Hexagon, Disc, Group, Ungroup,
 } from "lucide-react";
 import { RibbonButton } from "./ribbon-button";
 import { useEditorStore } from "@/stores/editor-store";
@@ -207,9 +207,9 @@ export function CommandManager() {
               </RibbonGroup>
               <RibbonGroup label="Shapes">
                 <div className="flex flex-col gap-0.5">
-                  <RibbonButton icon={Disc} label="Ellipse" size="small" testId="tool-ellipse" disabled={mode !== "sketch"} active={sketchSession?.activeTool === "ellipse" as any} onClick={() => setSketchTool("ellipse" as any)} />
-                  <RibbonButton icon={Hexagon} label="Polygon" size="small" testId="tool-polygon" disabled={mode !== "sketch"} active={sketchSession?.activeTool === "polygon" as any} onClick={() => setSketchTool("polygon" as any)} />
-                  <RibbonButton icon={Minus} label="Slot" size="small" testId="tool-slot" disabled={mode !== "sketch"} active={sketchSession?.activeTool === "slot" as any} onClick={() => setSketchTool("slot" as any)} />
+                  <RibbonButton icon={Disc} label="Ellipse" size="small" testId="tool-ellipse" disabled={mode !== "sketch"} active={sketchSession?.activeTool === "ellipse"} onClick={() => setSketchTool("ellipse")} />
+                  <RibbonButton icon={Hexagon} label="Polygon" size="small" testId="tool-polygon" disabled={mode !== "sketch"} active={sketchSession?.activeTool === "polygon"} onClick={() => setSketchTool("polygon")} />
+                  <RibbonButton icon={Minus} label="Slot" size="small" testId="tool-slot" disabled={mode !== "sketch"} active={sketchSession?.activeTool === "slot"} onClick={() => setSketchTool("slot")} />
                 </div>
               </RibbonGroup>
               <RibbonGroup label="Constrain">
@@ -243,20 +243,27 @@ export function CommandManager() {
               </RibbonGroup>
               <RibbonGroup label="Modify">
                 <div className="flex flex-col gap-0.5">
-                  <RibbonButton icon={Scissors} label="Trim" size="small" disabled={mode !== "sketch"} testId="tool-trim" active={sketchSession?.activeTool === "trim" as any} onClick={() => setSketchTool("trim" as any)} />
-                  <RibbonButton icon={ArrowUpRight} label="Extend" size="small" disabled={mode !== "sketch"} testId="tool-extend" active={sketchSession?.activeTool === "extend" as any} onClick={() => setSketchTool("extend" as any)} />
-                  <RibbonButton icon={Copy} label="Offset" size="small" disabled={mode !== "sketch"} testId="tool-offset" active={sketchSession?.activeTool === "offset" as any} onClick={() => setSketchTool("offset" as any)} />
+                  <RibbonButton icon={Scissors} label="Trim" size="small" disabled={mode !== "sketch"} testId="tool-trim" active={sketchSession?.activeTool === "trim"} onClick={() => setSketchTool("trim")} />
+                  <RibbonButton icon={ArrowUpRight} label="Extend" size="small" disabled={mode !== "sketch"} testId="tool-extend" active={sketchSession?.activeTool === "extend"} onClick={() => setSketchTool("extend")} />
+                  <RibbonButton icon={Copy} label="Offset" size="small" disabled={mode !== "sketch"} testId="tool-offset" active={sketchSession?.activeTool === "offset"} onClick={() => setSketchTool("offset")} />
                 </div>
                 <div className="flex flex-col gap-0.5">
-                  <RibbonButton icon={FlipHorizontal} label="Mirror" size="small" disabled={mode !== "sketch"} testId="tool-mirror" active={sketchSession?.activeTool === "mirror" as any} onClick={() => setSketchTool("mirror" as any)} />
-                  <RibbonButton icon={Construction} label="Constr." size="small" disabled={mode !== "sketch"} testId="tool-construction" onClick={() => {/* TODO: toggle construction on selected entity */}} />
+                  <RibbonButton icon={FlipHorizontal} label="Mirror" size="small" disabled={mode !== "sketch"} testId="tool-mirror" active={sketchSession?.activeTool === "mirror"} onClick={() => setSketchTool("mirror")} />
+                  <RibbonButton icon={Circle} label="Fillet" size="small" disabled={mode !== "sketch"} testId="tool-sketch-fillet" active={sketchSession?.activeTool === "sketch-fillet"} onClick={() => setSketchTool("sketch-fillet")} />
+                  <RibbonButton icon={Octagon} label="Chamfer" size="small" disabled={mode !== "sketch"} testId="tool-sketch-chamfer" active={sketchSession?.activeTool === "sketch-chamfer"} onClick={() => setSketchTool("sketch-chamfer")} />
+                </div>
+              </RibbonGroup>
+              <RibbonGroup label="Block">
+                <div className="flex flex-col gap-0.5">
+                  <RibbonButton icon={Group} label="Create" size="small" disabled={mode !== "sketch"} testId="tool-block-create" active={sketchSession?.activeTool === "block"} onClick={() => setSketchTool("block")} />
+                  <RibbonButton icon={Ungroup} label="Explode" size="small" disabled={mode !== "sketch"} testId="tool-block-explode" onClick={() => {/* TODO: explode selected block */}} />
                 </div>
               </RibbonGroup>
               <RibbonGroup label="Pattern">
                 <div className="flex flex-col gap-0.5">
-                  <RibbonButton icon={Grid3x3} label="Linear" size="small" testId="tool-sketch-linear-pattern" disabled={mode !== "sketch"} active={sketchSession?.activeTool === "sketch-linear-pattern" as any} onClick={() => setSketchTool("sketch-linear-pattern" as any)} />
-                  <RibbonButton icon={RefreshCw} label="Circular" size="small" testId="tool-sketch-circular-pattern" disabled={mode !== "sketch"} active={sketchSession?.activeTool === "sketch-circular-pattern" as any} onClick={() => setSketchTool("sketch-circular-pattern" as any)} />
-                  <RibbonButton icon={BoxSelect} label="Convert" size="small" testId="tool-convert-entities" disabled={mode !== "sketch"} active={sketchSession?.activeTool === "convert-entities" as any} onClick={() => setSketchTool("convert-entities" as any)} />
+                  <RibbonButton icon={Grid3x3} label="Linear" size="small" testId="tool-sketch-linear-pattern" disabled={mode !== "sketch"} active={sketchSession?.activeTool === "sketch-linear-pattern"} onClick={() => setSketchTool("sketch-linear-pattern")} />
+                  <RibbonButton icon={RefreshCw} label="Circular" size="small" testId="tool-sketch-circular-pattern" disabled={mode !== "sketch"} active={sketchSession?.activeTool === "sketch-circular-pattern"} onClick={() => setSketchTool("sketch-circular-pattern")} />
+                  <RibbonButton icon={BoxSelect} label="Convert" size="small" testId="tool-convert-entities" disabled={mode !== "sketch"} active={sketchSession?.activeTool === "convert-entities"} onClick={() => setSketchTool("convert-entities")} />
                 </div>
               </RibbonGroup>
               {/* Confirm / Cancel — always visible in sketch mode */}

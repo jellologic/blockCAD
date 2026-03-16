@@ -1,8 +1,9 @@
 use crate::error::{KernelError, KernelResult};
 use crate::solver::equations::{
     AngleEquation, CoincidentEquation, CollinearEquation, DistanceEquation, EqualLengthEquation,
-    FixedEquation, MidpointEquation, ParallelEquation, PerpendicularEquation, RadiusEquation,
-    SymmetricMidpointEquation, SymmetricPerpendicularEquation,
+    FixedEquation, MidpointEquation, ParallelEquation, PerpendicularEquation,
+    PointOnCircleEquation, PointOnLineEquation, RadiusEquation,
+    SymmetricMidpointEquation, SymmetricPerpendicularEquation, TangentLineCircleEquation,
 };
 use crate::solver::graph::ConstraintGraph;
 use crate::solver::variable::Variable;
@@ -345,9 +346,146 @@ pub fn build_constraint_graph(sketch: &Sketch) -> KernelResult<(ConstraintGraph,
                 }
             }
 
+            ConstraintKind::Coradial => {
+                // Two circles/arcs share same center and same radius.
+                // entities[0] and entities[1] are circles.
+                let e1 = sketch.entities.get(constraint.entities[0])?;
+                let e2 = sketch.entities.get(constraint.entities[1])?;
+                if let (
+                    SketchEntity::Circle { center: c1, .. },
+                    SketchEntity::Circle { center: c2, .. },
+                ) = (e1, e2)
+                {
+                    // Same center (coincident)
+                    let (cx1, cy1) = var_map.point_vars(*c1).ok_or_else(|| {
+                        KernelError::Internal("Coradial: circle1 center not a point".into())
+                    })?;
+                    let (cx2, cy2) = var_map.point_vars(*c2).ok_or_else(|| {
+                        KernelError::Internal("Coradial: circle2 center not a point".into())
+                    })?;
+                    graph.add_equation(Box::new(CoincidentEquation::new(cx1, cx2)));
+                    graph.add_equation(Box::new(CoincidentEquation::new(cy1, cy2)));
+
+                    // Same radius
+                    if let (Some(r1), Some(r2)) = (
+                        var_map.circle_radius_var(constraint.entities[0]),
+                        var_map.circle_radius_var(constraint.entities[1]),
+                    ) {
+                        graph.add_equation(Box::new(CoincidentEquation::new(r1, r2)));
+                    }
+                }
+            }
+
+            ConstraintKind::PointOnCurve => {
+                // Point lies on a curve (line or circle).
+                // entities[0] = point, entities[1] = curve (line or circle)
+                let point_id = constraint.entities[0];
+                let curve_id = constraint.entities[1];
+                let (px, py) = var_map.point_vars(point_id).ok_or_else(|| {
+                    KernelError::Internal("PointOnCurve: entity 0 not a point".into())
+                })?;
+                let curve = sketch.entities.get(curve_id)?;
+                match curve {
+                    SketchEntity::Line { start, end } => {
+                        let (ax, ay) = var_map.point_vars(*start).ok_or_else(|| {
+                            KernelError::Internal("PointOnCurve: line start not a point".into())
+                        })?;
+                        let (bx, by) = var_map.point_vars(*end).ok_or_else(|| {
+                            KernelError::Internal("PointOnCurve: line end not a point".into())
+                        })?;
+                        graph.add_equation(Box::new(PointOnLineEquation::new(
+                            ax, ay, bx, by, px, py,
+                        )));
+                    }
+                    SketchEntity::Circle { center, .. } => {
+                        let (cx, cy) = var_map.point_vars(*center).ok_or_else(|| {
+                            KernelError::Internal("PointOnCurve: circle center not a point".into())
+                        })?;
+                        let r = var_map.circle_radius_var(curve_id).ok_or_else(|| {
+                            KernelError::Internal("PointOnCurve: circle has no radius var".into())
+                        })?;
+                        graph.add_equation(Box::new(PointOnCircleEquation::new(
+                            px, py, cx, cy, r,
+                        )));
+                    }
+                    _ => {} // Unsupported curve type
+                }
+            }
+
             ConstraintKind::Tangent => {
-                // Tangent between line and circle (or two circles) — complex, skip for now
-                // TODO: Implement tangent constraint equations
+                // Tangent between a line and a circle, or two circles
+                let e1 = sketch.entities.get(constraint.entities[0])?;
+                let e2 = sketch.entities.get(constraint.entities[1])?;
+                match (e1, e2) {
+                    // Line-Circle tangent
+                    (
+                        SketchEntity::Line { start, end },
+                        SketchEntity::Circle { center, .. },
+                    ) => {
+                        let (ax, ay) = var_map.point_vars(*start).ok_or_else(|| {
+                            KernelError::Internal("Tangent: line start not a point".into())
+                        })?;
+                        let (bx, by) = var_map.point_vars(*end).ok_or_else(|| {
+                            KernelError::Internal("Tangent: line end not a point".into())
+                        })?;
+                        let (cx, cy) = var_map.point_vars(*center).ok_or_else(|| {
+                            KernelError::Internal("Tangent: circle center not a point".into())
+                        })?;
+                        let r = var_map.circle_radius_var(constraint.entities[1]).ok_or_else(|| {
+                            KernelError::Internal("Tangent: circle has no radius var".into())
+                        })?;
+                        graph.add_equation(Box::new(TangentLineCircleEquation::new(
+                            ax, ay, bx, by, cx, cy, r,
+                        )));
+                    }
+                    // Circle-Line tangent (reversed order)
+                    (
+                        SketchEntity::Circle { center, .. },
+                        SketchEntity::Line { start, end },
+                    ) => {
+                        let (ax, ay) = var_map.point_vars(*start).ok_or_else(|| {
+                            KernelError::Internal("Tangent: line start not a point".into())
+                        })?;
+                        let (bx, by) = var_map.point_vars(*end).ok_or_else(|| {
+                            KernelError::Internal("Tangent: line end not a point".into())
+                        })?;
+                        let (cx, cy) = var_map.point_vars(*center).ok_or_else(|| {
+                            KernelError::Internal("Tangent: circle center not a point".into())
+                        })?;
+                        let r = var_map.circle_radius_var(constraint.entities[0]).ok_or_else(|| {
+                            KernelError::Internal("Tangent: circle has no radius var".into())
+                        })?;
+                        graph.add_equation(Box::new(TangentLineCircleEquation::new(
+                            ax, ay, bx, by, cx, cy, r,
+                        )));
+                    }
+                    // Circle-Circle tangent (external): dist(centers) = r1 + r2
+                    (
+                        SketchEntity::Circle { center: c1, .. },
+                        SketchEntity::Circle { center: c2, .. },
+                    ) => {
+                        let (cx1, cy1) = var_map.point_vars(*c1).ok_or_else(|| {
+                            KernelError::Internal("Tangent: circle1 center not a point".into())
+                        })?;
+                        let (cx2, cy2) = var_map.point_vars(*c2).ok_or_else(|| {
+                            KernelError::Internal("Tangent: circle2 center not a point".into())
+                        })?;
+                        // For external tangent, distance = r1 + r2
+                        // We need the current radii to compute the target distance
+                        if let (
+                            SketchEntity::Circle { radius: r1, .. },
+                            SketchEntity::Circle { radius: r2, .. },
+                        ) = (
+                            sketch.entities.get(constraint.entities[0])?,
+                            sketch.entities.get(constraint.entities[1])?,
+                        ) {
+                            graph.add_equation(Box::new(DistanceEquation::new(
+                                cx1, cy1, cx2, cy2, r1 + r2,
+                            )));
+                        }
+                    }
+                    _ => {} // Unsupported tangent combination
+                }
             }
         }
     }
@@ -590,5 +728,246 @@ mod tests {
         assert!((graph.variables.value(y2) - 5.0).abs() < 1e-6);
         assert!((graph.variables.value(x3) - 0.0).abs() < 1e-6);
         assert!((graph.variables.value(y3) - 5.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_coradial_constraint() {
+        // Two circles with different centers and radii.
+        // Coradial should force same center and same radius.
+        let mut sketch = Sketch::new(Plane::xy(0.0));
+
+        let c1_center = sketch.add_entity(SketchEntity::Point {
+            position: Pt2::new(1.0, 2.0),
+        });
+        let circle1 = sketch.add_entity(SketchEntity::Circle {
+            center: c1_center,
+            radius: 3.0,
+        });
+
+        let c2_center = sketch.add_entity(SketchEntity::Point {
+            position: Pt2::new(1.5, 2.5),
+        });
+        let circle2 = sketch.add_entity(SketchEntity::Circle {
+            center: c2_center,
+            radius: 4.0,
+        });
+
+        // Fix circle1's center so the solver has something to anchor to
+        sketch.add_constraint(Constraint::new(ConstraintKind::Fixed, vec![c1_center]));
+        // Fix circle1's radius
+        sketch.add_constraint(Constraint::new(
+            ConstraintKind::Radius { value: 3.0 },
+            vec![circle1],
+        ));
+        // Coradial: circles must share center and radius
+        sketch.add_constraint(Constraint::new(
+            ConstraintKind::Coradial,
+            vec![circle1, circle2],
+        ));
+
+        let (graph, _) = build_constraint_graph(&sketch).unwrap();
+        // Coradial produces 3 equations: 2 coincident (cx, cy) + 1 equal radius
+        // Plus Fixed produces 2, Radius produces 1 = total 6
+        assert_eq!(graph.equation_count(), 6);
+
+        // Now solve and verify
+        let (mut graph, var_map) = build_constraint_graph(&sketch).unwrap();
+        let result = solve(&mut graph, &SolverConfig::default()).unwrap();
+        assert!(result.converged, "Solver should converge for coradial");
+
+        let (cx1, cy1) = var_map.point_vars(c1_center).unwrap();
+        let (cx2, cy2) = var_map.point_vars(c2_center).unwrap();
+        let r1 = var_map.circle_radius_var(circle1).unwrap();
+        let r2 = var_map.circle_radius_var(circle2).unwrap();
+
+        // Centers should match
+        assert!((graph.variables.value(cx1) - graph.variables.value(cx2)).abs() < 1e-6);
+        assert!((graph.variables.value(cy1) - graph.variables.value(cy2)).abs() < 1e-6);
+        // Radii should match
+        assert!((graph.variables.value(r1) - graph.variables.value(r2)).abs() < 1e-6);
+        // And both radii should be 3.0
+        assert!((graph.variables.value(r1) - 3.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_point_on_line_constraint() {
+        // A line and a separate point. PointOnCurve should place the point on the line.
+        let mut sketch = Sketch::new(Plane::xy(0.0));
+
+        let p_start = sketch.add_entity(SketchEntity::Point {
+            position: Pt2::new(0.0, 0.0),
+        });
+        let p_end = sketch.add_entity(SketchEntity::Point {
+            position: Pt2::new(10.0, 0.0),
+        });
+        let line = sketch.add_entity(SketchEntity::Line {
+            start: p_start,
+            end: p_end,
+        });
+
+        // A point off the line (x=5, y=3)
+        let p_free = sketch.add_entity(SketchEntity::Point {
+            position: Pt2::new(5.0, 3.0),
+        });
+
+        // Fix line endpoints
+        sketch.add_constraint(Constraint::new(ConstraintKind::Fixed, vec![p_start]));
+        sketch.add_constraint(Constraint::new(ConstraintKind::Fixed, vec![p_end]));
+        // Fix the free point's x so the system is fully determined (1 DOF for y, 1 equation)
+        // We use a distance constraint from p_start to p_free of 5.0 along x, combined with
+        // the PointOnCurve. Instead, just also fix its x by adding a distance-from-start constraint
+        // Actually, easiest: constrain x by fixing it at x=5 via a second point + coincident on x.
+        // Simpler: add a distance constraint between p_start and p_free = 5.0 (after solving on-line, dist will be 5).
+        sketch.add_constraint(Constraint::new(
+            ConstraintKind::Distance { value: 5.0 },
+            vec![p_start, p_free],
+        ));
+        // Point on line constraint
+        sketch.add_constraint(Constraint::new(
+            ConstraintKind::PointOnCurve,
+            vec![p_free, line],
+        ));
+
+        let (mut graph, var_map) = build_constraint_graph(&sketch).unwrap();
+        let result = solve(&mut graph, &SolverConfig::default()).unwrap();
+        assert!(result.converged, "Solver should converge for point-on-line");
+
+        let (_px, py) = var_map.point_vars(p_free).unwrap();
+        let solved_y = graph.variables.value(py);
+        // Line is y=0 from (0,0) to (10,0), so point should be at y=0
+        assert!(
+            solved_y.abs() < 1e-6,
+            "Point should lie on the horizontal line, y={}", solved_y
+        );
+    }
+
+    #[test]
+    fn test_point_on_circle_constraint() {
+        // A circle and a separate point. PointOnCurve should place the point on the circle.
+        // We fix center, radius, and the point's x-coordinate so the system is fully determined.
+        let mut sketch = Sketch::new(Plane::xy(0.0));
+
+        let center = sketch.add_entity(SketchEntity::Point {
+            position: Pt2::new(0.0, 0.0),
+        });
+        let circle = sketch.add_entity(SketchEntity::Circle {
+            center,
+            radius: 5.0,
+        });
+
+        // A point near the circle (x=3, y=4 is exactly on a radius-5 circle; start slightly off)
+        let p_free = sketch.add_entity(SketchEntity::Point {
+            position: Pt2::new(3.0, 4.5),
+        });
+
+        // Use a helper fixed point at x=3 and constrain p_free's x via Vertical alignment
+        let p_anchor = sketch.add_entity(SketchEntity::Point {
+            position: Pt2::new(3.0, 0.0),
+        });
+        let vline = sketch.add_entity(SketchEntity::Line {
+            start: p_anchor,
+            end: p_free,
+        });
+
+        // Fix center, radius, and anchor
+        sketch.add_constraint(Constraint::new(ConstraintKind::Fixed, vec![center]));
+        sketch.add_constraint(Constraint::new(ConstraintKind::Fixed, vec![p_anchor]));
+        sketch.add_constraint(Constraint::new(
+            ConstraintKind::Radius { value: 5.0 },
+            vec![circle],
+        ));
+        // Vertical constraint on the helper line fixes p_free's x to 3.0
+        sketch.add_constraint(Constraint::new(ConstraintKind::Vertical, vec![vline]));
+        // Point on circle
+        sketch.add_constraint(Constraint::new(
+            ConstraintKind::PointOnCurve,
+            vec![p_free, circle],
+        ));
+
+        let (mut graph, var_map) = build_constraint_graph(&sketch).unwrap();
+        let result = solve(&mut graph, &SolverConfig::default()).unwrap();
+        assert!(result.converged, "Solver should converge for point-on-circle");
+
+        let (px, py) = var_map.point_vars(p_free).unwrap();
+        let (cx, cy) = var_map.point_vars(center).unwrap();
+        let sx = graph.variables.value(px) - graph.variables.value(cx);
+        let sy = graph.variables.value(py) - graph.variables.value(cy);
+        let dist = (sx * sx + sy * sy).sqrt();
+        assert!(
+            (dist - 5.0).abs() < 1e-6,
+            "Point should be at distance 5 from center, got {}", dist
+        );
+    }
+
+    #[test]
+    fn test_tangent_line_circle_constraint() {
+        // A horizontal line and a circle above it.
+        // Tangent should make the perpendicular distance from center to line equal the radius.
+        // Center x is fixed so the system is fully determined (1 DOF for center y, 1 equation).
+        let mut sketch = Sketch::new(Plane::xy(0.0));
+
+        // Horizontal line at y=0
+        let l_start = sketch.add_entity(SketchEntity::Point {
+            position: Pt2::new(-10.0, 0.0),
+        });
+        let l_end = sketch.add_entity(SketchEntity::Point {
+            position: Pt2::new(10.0, 0.0),
+        });
+        let line = sketch.add_entity(SketchEntity::Line {
+            start: l_start,
+            end: l_end,
+        });
+
+        // Circle above the line — center starts at (0, 4), should move to (0, 3)
+        let center = sketch.add_entity(SketchEntity::Point {
+            position: Pt2::new(0.0, 4.0),
+        });
+        let circle = sketch.add_entity(SketchEntity::Circle {
+            center,
+            radius: 3.0,
+        });
+
+        // Helper: fix center x by using a vertical line from a fixed anchor
+        let anchor = sketch.add_entity(SketchEntity::Point {
+            position: Pt2::new(0.0, 0.0),
+        });
+        let vline = sketch.add_entity(SketchEntity::Line {
+            start: anchor,
+            end: center,
+        });
+
+        // Fix the line endpoints and anchor
+        sketch.add_constraint(Constraint::new(ConstraintKind::Fixed, vec![l_start]));
+        sketch.add_constraint(Constraint::new(ConstraintKind::Fixed, vec![l_end]));
+        sketch.add_constraint(Constraint::new(ConstraintKind::Fixed, vec![anchor]));
+        // Fix center's x via vertical constraint
+        sketch.add_constraint(Constraint::new(ConstraintKind::Vertical, vec![vline]));
+        // Fix the radius
+        sketch.add_constraint(Constraint::new(
+            ConstraintKind::Radius { value: 3.0 },
+            vec![circle],
+        ));
+        // Tangent constraint
+        sketch.add_constraint(Constraint::new(
+            ConstraintKind::Tangent,
+            vec![line, circle],
+        ));
+
+        let (mut graph, var_map) = build_constraint_graph(&sketch).unwrap();
+        let result = solve(&mut graph, &SolverConfig::default()).unwrap();
+        assert!(result.converged, "Solver should converge for tangent line-circle");
+
+        // Read solved center position
+        let (_cx_var, cy_var) = var_map.point_vars(center).unwrap();
+        let cy = graph.variables.value(cy_var);
+        let r_var = var_map.circle_radius_var(circle).unwrap();
+        let r = graph.variables.value(r_var);
+
+        // The line is at y=0 (horizontal). Perpendicular distance from center to line = |cy|.
+        // Tangent means |cy| == r.
+        assert!(
+            (cy.abs() - r).abs() < 1e-6,
+            "Perpendicular distance from center to line should equal radius: |cy|={}, r={}", cy.abs(), r
+        );
     }
 }

@@ -10,9 +10,22 @@ import { handleCircleClick } from "./tools/circle-tool";
 import { handleArcClick, circumcenter } from "./tools/arc-tool";
 import { handleDimensionClick } from "./tools/dimension-tool";
 import { handleMeasureClick } from "./tools/measure-tool";
+import { handleSketchFilletClick } from "./tools/sketch-fillet-tool";
+import { handleSketchChamferClick } from "./tools/sketch-chamfer-tool";
+import { handleBlockClick } from "./tools/block-tool";
+import { handleTrimClick } from "./tools/trim-tool";
+import { handleExtendClick } from "./tools/extend-tool";
+import { handleOffsetClick } from "./tools/offset-tool";
+import { handleMirrorClick } from "./tools/mirror-tool";
+import { handleEllipseClick } from "./tools/ellipse-tool";
+import { handlePolygonClick } from "./tools/polygon-tool";
+import { handleSlotClick } from "./tools/slot-tool";
+import { handleSketchLinearPatternClick } from "./tools/sketch-linear-pattern-tool";
+import { handleSketchCircularPatternClick } from "./tools/sketch-circular-pattern-tool";
+import { handleConvertEntitiesClick } from "./tools/convert-entities-tool";
 import { DimensionInputOverlay } from "./dimension-input";
 import { RelationsDialog } from "./relations-dialog";
-import { findNearestPoint } from "./tools/snap-utils";
+import { findNearestPoint, findSnapTarget } from "./tools/snap-utils";
 import { usePreferencesStore } from "@/stores/preferences-store";
 
 // Extend R3F catalogue so we can use <line_> for THREE.Line (avoids SVG conflict)
@@ -759,12 +772,18 @@ function SnapIndicator({ plane }: { plane: SketchPlane }) {
 
   const snap = useMemo(() => {
     if (!cursorPos || !activeTool) return null;
-    return findNearestPoint(cursorPos, entities);
+    const target = findSnapTarget(cursorPos, entities);
+    if (target) return { id: target.targetId ?? "", position: target.position, snapType: target.type };
+    return findNearestPoint(cursorPos, entities) ? { ...findNearestPoint(cursorPos, entities)!, snapType: "coincident" as const } : null;
   }, [cursorPos, entities, activeTool]);
 
   if (!snap) return null;
 
   const worldPos = sketchToWorld(snap.position, plane);
+  const snapSymbol = snap.snapType === "midpoint" ? "△"
+    : snap.snapType === "center" ? "⊕"
+    : snap.snapType === "intersection" ? "✕"
+    : "⊙";
   return (
     <group>
       <mesh position={worldPos}>
@@ -773,7 +792,7 @@ function SnapIndicator({ plane }: { plane: SketchPlane }) {
       </mesh>
       <Html position={worldPos} center>
         <div className="pointer-events-none select-none text-[9px] font-bold text-[#ffcc00] ml-4 -mt-2">
-          ⊙
+          {snapSymbol}
         </div>
       </Html>
     </group>
@@ -824,6 +843,32 @@ export function SketchOverlay() {
         handleDimensionClick(sketchPt);
       } else if (tool === "measure") {
         handleMeasureClick(sketchPt);
+      } else if (tool === "ellipse") {
+        handleEllipseClick(sketchPt);
+      } else if (tool === "polygon") {
+        handlePolygonClick(sketchPt);
+      } else if (tool === "slot") {
+        handleSlotClick(sketchPt);
+      } else if (tool === "trim") {
+        handleTrimClick(sketchPt);
+      } else if (tool === "extend") {
+        handleExtendClick(sketchPt);
+      } else if (tool === "offset") {
+        handleOffsetClick(sketchPt);
+      } else if (tool === "mirror") {
+        handleMirrorClick(sketchPt);
+      } else if (tool === "sketch-fillet") {
+        handleSketchFilletClick(sketchPt);
+      } else if (tool === "sketch-chamfer") {
+        handleSketchChamferClick(sketchPt);
+      } else if (tool === "sketch-linear-pattern") {
+        handleSketchLinearPatternClick(sketchPt);
+      } else if (tool === "sketch-circular-pattern") {
+        handleSketchCircularPatternClick(sketchPt);
+      } else if (tool === "convert-entities") {
+        handleConvertEntitiesClick(sketchPt);
+      } else if (tool === "block") {
+        handleBlockClick(sketchPt);
       } else {
         // No tool active — clicking empty space clears selection
         setSelectedEntityIds([]);

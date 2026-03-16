@@ -179,3 +179,118 @@ describe("editor store - sketch mode", () => {
     expect(useEditorStore.getState().sketchSession!.pendingPoints).toHaveLength(0);
   });
 });
+
+describe("editor store - delete and undo/redo", () => {
+  beforeEach(async () => {
+    useEditorStore.setState({
+      kernel: null, meshData: null, features: [], isLoading: true, error: null,
+      mode: "view", selectedFeatureId: null, selectedFaceIndex: null,
+      hoveredFaceIndex: null, wireframe: false, showEdges: true,
+      activeOperation: null, sketchSession: null, sketchSolver: null, sketchDofStatus: null,
+      sketchHistory: [], sketchRedoStack: [], sketchUndoBatching: false,
+    });
+    await useEditorStore.getState().initKernel();
+    useEditorStore.getState().enterSketchMode("front");
+  });
+
+  // deleteSelectedEntities tests
+  it("deleting entity removes it from session", () => {
+    const store = useEditorStore.getState();
+    store.addSketchEntity({ type: "point", id: "se-0", position: { x: 1, y: 2 } });
+    expect(useEditorStore.getState().sketchSession!.entities).toHaveLength(1);
+
+    store.deleteSelectedEntities(["se-0"]);
+    expect(useEditorStore.getState().sketchSession!.entities).toHaveLength(0);
+  });
+
+  it("deleting line removes orphaned constraints", () => {
+    const store = useEditorStore.getState();
+    store.addSketchEntity({ type: "point", id: "se-0", position: { x: 0, y: 0 } });
+    store.addSketchEntity({ type: "point", id: "se-1", position: { x: 10, y: 0 } });
+    store.addSketchEntity({ type: "line", id: "se-2", startId: "se-0", endId: "se-1" });
+    store.addSketchConstraint({ id: "sc-0", kind: "horizontal", entityIds: ["se-2"] });
+
+    expect(useEditorStore.getState().sketchSession!.constraints).toHaveLength(1);
+    store.deleteSelectedEntities(["se-2"]);
+    expect(useEditorStore.getState().sketchSession!.constraints).toHaveLength(0);
+  });
+
+  it("delete with empty IDs is no-op", () => {
+    const store = useEditorStore.getState();
+    store.addSketchEntity({ type: "point", id: "se-0", position: { x: 0, y: 0 } });
+    store.deleteSelectedEntities([]);
+    expect(useEditorStore.getState().sketchSession!.entities).toHaveLength(1);
+  });
+
+  // undoSketch tests
+  it("undo restores previous entity state", () => {
+    const store = useEditorStore.getState();
+    store.addSketchEntity({ type: "point", id: "se-0", position: { x: 0, y: 0 } });
+    store.addSketchEntity({ type: "point", id: "se-1", position: { x: 5, y: 5 } });
+
+    expect(useEditorStore.getState().sketchSession!.entities).toHaveLength(2);
+    store.undoSketch();
+    expect(useEditorStore.getState().sketchSession!.entities).toHaveLength(1);
+  });
+
+  it("redo restores undone state", () => {
+    const store = useEditorStore.getState();
+    store.addSketchEntity({ type: "point", id: "se-0", position: { x: 0, y: 0 } });
+    store.addSketchEntity({ type: "point", id: "se-1", position: { x: 5, y: 5 } });
+
+    store.undoSketch();
+    expect(useEditorStore.getState().sketchSession!.entities).toHaveLength(1);
+    store.redoSketch();
+    expect(useEditorStore.getState().sketchSession!.entities).toHaveLength(2);
+  });
+
+  it("multiple undo/redo cycle", () => {
+    const store = useEditorStore.getState();
+    store.addSketchEntity({ type: "point", id: "se-0", position: { x: 0, y: 0 } });
+    store.addSketchEntity({ type: "point", id: "se-1", position: { x: 1, y: 1 } });
+    store.addSketchEntity({ type: "point", id: "se-2", position: { x: 2, y: 2 } });
+
+    // 3 entities -> undo -> 2 -> undo -> 1
+    store.undoSketch();
+    store.undoSketch();
+    expect(useEditorStore.getState().sketchSession!.entities).toHaveLength(1);
+
+    // redo -> 2
+    store.redoSketch();
+    expect(useEditorStore.getState().sketchSession!.entities).toHaveLength(2);
+  });
+
+  it("undo when history empty is no-op", () => {
+    // Manually clear history that may leak from prior tests
+    useEditorStore.setState({ sketchHistory: [], sketchRedoStack: [] });
+    const session = useEditorStore.getState().sketchSession!;
+    const countBefore = session.entities.length;
+    useEditorStore.getState().undoSketch();
+    expect(useEditorStore.getState().sketchSession!.entities).toHaveLength(countBefore);
+  });
+
+  it("redo when stack empty is no-op", () => {
+    const store = useEditorStore.getState();
+    store.addSketchEntity({ type: "point", id: "se-0", position: { x: 0, y: 0 } });
+    const entitiesAfter = useEditorStore.getState().sketchSession!.entities.length;
+    store.redoSketch(); // nothing to redo
+    expect(useEditorStore.getState().sketchSession!.entities).toHaveLength(entitiesAfter);
+  });
+
+  // Undo batching
+  it("batched operations undo as single step", () => {
+    const store = useEditorStore.getState();
+
+    store.beginUndoBatch();
+    store.addSketchEntity({ type: "point", id: "se-0", position: { x: 0, y: 0 } });
+    store.addSketchEntity({ type: "point", id: "se-1", position: { x: 1, y: 1 } });
+    store.addSketchEntity({ type: "point", id: "se-2", position: { x: 2, y: 2 } });
+    store.endUndoBatch();
+
+    expect(useEditorStore.getState().sketchSession!.entities).toHaveLength(3);
+
+    // ONE undo should remove ALL 3 entities (the batch)
+    store.undoSketch();
+    expect(useEditorStore.getState().sketchSession!.entities).toHaveLength(0);
+  });
+});

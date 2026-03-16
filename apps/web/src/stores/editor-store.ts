@@ -33,7 +33,14 @@ function downloadFile(data: Uint8Array | string, filename: string, mimeType: str
   URL.revokeObjectURL(url);
 }
 
-type SketchToolId = "line" | "circle" | "rectangle" | "arc" | "dimension" | "measure" | null;
+type SketchToolId =
+  | "line" | "circle" | "rectangle" | "arc" | "dimension" | "measure"
+  | "ellipse" | "polygon" | "slot"
+  | "trim" | "extend" | "offset" | "mirror"
+  | "sketch-fillet" | "sketch-chamfer"
+  | "sketch-linear-pattern" | "sketch-circular-pattern"
+  | "convert-entities" | "block"
+  | null;
 
 type DofStatus = "fully_constrained" | "under_constrained" | "over_constrained" | null;
 
