@@ -144,6 +144,7 @@ pub fn tessellate_brep(
         face_index += 1;
     }
 
+    combined.fix_winding();
     combined.validate()?;
     Ok(combined)
 }

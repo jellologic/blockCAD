@@ -33,6 +33,36 @@ impl TriMesh {
         self.indices.len() / 3
     }
 
+    /// Fix triangle winding to match per-vertex normals.
+    /// For each triangle, if the cross-product normal disagrees with the
+    /// vertex normal, swap two indices to flip the winding.
+    pub fn fix_winding(&mut self) {
+        for tri in self.indices.chunks_mut(3) {
+            let i0 = tri[0] as usize;
+            let i1 = tri[1] as usize;
+            let i2 = tri[2] as usize;
+
+            let v0 = [self.positions[i0*3], self.positions[i0*3+1], self.positions[i0*3+2]];
+            let v1 = [self.positions[i1*3], self.positions[i1*3+1], self.positions[i1*3+2]];
+            let v2 = [self.positions[i2*3], self.positions[i2*3+1], self.positions[i2*3+2]];
+
+            let e1 = [v1[0]-v0[0], v1[1]-v0[1], v1[2]-v0[2]];
+            let e2 = [v2[0]-v0[0], v2[1]-v0[1], v2[2]-v0[2]];
+            let cross = [
+                e1[1]*e2[2] - e1[2]*e2[1],
+                e1[2]*e2[0] - e1[0]*e2[2],
+                e1[0]*e2[1] - e1[1]*e2[0],
+            ];
+
+            let vn = [self.normals[i0*3], self.normals[i0*3+1], self.normals[i0*3+2]];
+            let dot = cross[0]*vn[0] + cross[1]*vn[1] + cross[2]*vn[2];
+
+            if dot < 0.0 {
+                tri.swap(1, 2);
+            }
+        }
+    }
+
     /// Merge another mesh into this one, offsetting indices
     pub fn merge(&mut self, other: &TriMesh) {
         let offset = self.vertex_count() as u32;
