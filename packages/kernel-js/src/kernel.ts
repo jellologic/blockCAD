@@ -113,19 +113,42 @@ function toEntityStore(items: any[]): any {
  * Transform frontend FeatureParams to Rust FeatureParams serde format.
  * Handles the schema differences between TS camelCase and Rust snake_case.
  */
+/**
+ * Normalize entities/constraints that may be either a flat SketchEntity2D[]
+ * (from the frontend editor session) or an EntityStore object
+ * (from a kernel roundtrip via featureList JSON).
+ */
+function normalizeEntities(raw: any): any[] {
+  if (Array.isArray(raw)) return raw;
+  // EntityStore format: { entries: [{ Occupied: { value, generation } } | "Free"], ... }
+  if (raw && Array.isArray(raw.entries)) {
+    return raw.entries
+      .filter((e: any) => e && typeof e === "object" && e.Occupied)
+      .map((e: any) => e.Occupied.value);
+  }
+  return [];
+}
+
 function transformParams(kind: string, params: FeatureParams): any {
   if (kind === "sketch" && params.type === "sketch") {
     const p = params.params;
+    const entities = normalizeEntities(p.entities);
+    const constraints = normalizeEntities(p.constraints);
+
+    // If entities are already in Rust format (from kernel roundtrip), pass through
+    const isRustFormat = entities.length > 0 && entities[0] && typeof entities[0] === "object"
+      && ("Point" in entities[0] || "Line" in entities[0] || "Circle" in entities[0] || "Arc" in entities[0]);
+
     return {
       type: "sketch",
       params: {
         plane: transformPlane(p.plane),
-        entities: toEntityStore(
-          (p.entities ?? []).map(transformSketchEntity)
-        ),
-        constraints: toEntityStore(
-          (p.constraints ?? []).map(transformSketchConstraint)
-        ),
+        entities: isRustFormat
+          ? toEntityStore(entities)
+          : toEntityStore(entities.map(transformSketchEntity)),
+        constraints: isRustFormat
+          ? toEntityStore(constraints)
+          : toEntityStore(constraints.map(transformSketchConstraint)),
       },
     };
   }

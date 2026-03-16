@@ -282,17 +282,36 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         get().updateOperationParams({ from_face_index: index });
       }
     }
-    // If fillet/chamfer operation is active, toggle edge selection
+    // If fillet/chamfer operation is active, derive edge indices from face selection.
+    // Each face of a box-like solid has edges shared with adjacent faces.
+    // We map face index → the edges that border that face in the BRep.
     if (activeOperation && (activeOperation.type === "fillet" || activeOperation.type === "chamfer")) {
       if (index != null) {
-        const currentEdges = activeOperation.params.edge_indices || [];
-        // Toggle: if already has edges, clear them; otherwise add first few
-        if (currentEdges.length > 0) {
-          get().updateOperationParams({ edge_indices: [] });
+        const currentEdges: number[] = activeOperation.params.edge_indices || [];
+        // For a simple extruded box, edges are indexed 0–11.
+        // Map each face to its bordering edges based on typical BRep topology:
+        // Face 0 (bottom): edges 0,1,2,3
+        // Face 1 (top): edges 4,5,6,7
+        // Face 2-5 (sides): edges shared between top/bottom
+        const faceEdgeMap: Record<number, number[]> = {
+          0: [0, 1, 2, 3],
+          1: [4, 5, 6, 7],
+          2: [0, 4, 8, 9],
+          3: [1, 5, 9, 10],
+          4: [2, 6, 10, 11],
+          5: [3, 7, 8, 11],
+        };
+        const faceEdges = faceEdgeMap[index] ?? [index];
+
+        // Toggle: add edges if not present, remove if already selected
+        const edgeSet = new Set(currentEdges);
+        const allPresent = faceEdges.every(e => edgeSet.has(e));
+        if (allPresent) {
+          faceEdges.forEach(e => edgeSet.delete(e));
         } else {
-          // Select first 4 shared edges as a starter
-          get().updateOperationParams({ edge_indices: [0, 1, 2, 3] });
+          faceEdges.forEach(e => edgeSet.add(e));
         }
+        get().updateOperationParams({ edge_indices: Array.from(edgeSet) });
       }
     }
   },

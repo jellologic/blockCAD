@@ -33,11 +33,11 @@ export function ChamferPanel() {
           className="w-full rounded border border-[var(--cad-border)] bg-[var(--cad-bg-panel)] px-2 py-1.5 text-xs text-[var(--cad-text-secondary)] hover:bg-[var(--cad-bg-hover)] transition-colors"
         >
           {edge_indices.length > 0
-            ? `${edge_indices.length} edge(s) selected`
+            ? `${edge_indices.length} edge(s) selected — [${edge_indices.join(", ")}]`
             : "Click faces to select edges..."}
         </button>
         <p className="mt-0.5 text-[10px] text-[var(--cad-text-muted)]">
-          Click on faces to select their edges
+          Click faces to toggle their edges. Click again to deselect.
         </p>
       </div>
 

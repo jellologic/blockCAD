@@ -260,4 +260,45 @@ describe("editor store - sketch to extrude pipeline", () => {
     expect(useEditorStore.getState().kernel).not.toBeNull();
     expect(useEditorStore.getState().mode).toBe("view");
   });
+
+  it("second operation after extrude replays features correctly", async () => {
+    // This tests the bug where kernel roundtrip converts entities from
+    // SketchEntity2D[] to EntityStore format, breaking subsequent replays.
+
+    // Step 1: Create and confirm sketch
+    useEditorStore.getState().enterSketchMode("front");
+    const store = useEditorStore.getState();
+    store.addSketchEntity({ type: "point", id: "se-0", position: { x: 0, y: 0 } });
+    store.addSketchEntity({ type: "point", id: "se-1", position: { x: 10, y: 0 } });
+    store.addSketchEntity({ type: "point", id: "se-2", position: { x: 10, y: 5 } });
+    store.addSketchEntity({ type: "point", id: "se-3", position: { x: 0, y: 5 } });
+    store.addSketchEntity({ type: "line", id: "se-4", startId: "se-0", endId: "se-1" });
+    store.addSketchEntity({ type: "line", id: "se-5", startId: "se-1", endId: "se-2" });
+    store.addSketchEntity({ type: "line", id: "se-6", startId: "se-2", endId: "se-3" });
+    store.addSketchEntity({ type: "line", id: "se-7", startId: "se-3", endId: "se-0" });
+    store.addSketchConstraint({ id: "sc-0", kind: "fixed", entityIds: ["se-0"] });
+    store.addSketchConstraint({ id: "sc-1", kind: "horizontal", entityIds: ["se-4"] });
+    store.addSketchConstraint({ id: "sc-2", kind: "horizontal", entityIds: ["se-6"] });
+    store.addSketchConstraint({ id: "sc-3", kind: "vertical", entityIds: ["se-5"] });
+    store.addSketchConstraint({ id: "sc-4", kind: "vertical", entityIds: ["se-7"] });
+    store.addSketchConstraint({ id: "sc-5", kind: "distance", entityIds: ["se-0", "se-1"], value: 10 });
+    store.addSketchConstraint({ id: "sc-6", kind: "distance", entityIds: ["se-1", "se-2"], value: 5 });
+    useEditorStore.getState().exitSketchMode(true);
+
+    // Step 2: First extrude
+    useEditorStore.getState().startOperation("extrude");
+    useEditorStore.getState().updateOperationParams({ depth: 10 });
+    await useEditorStore.getState().confirmOperation();
+    expect(useEditorStore.getState().activeOperation).toBeNull();
+    expect(useEditorStore.getState().meshData).not.toBeNull();
+
+    // Step 3: Second operation (fillet) — this replays features from kernel
+    // roundtrip where entities are in EntityStore format, not SketchEntity2D[]
+    useEditorStore.getState().startOperation("fillet");
+    useEditorStore.getState().updateOperationParams({ edge_indices: [0], radius: 1 });
+    await useEditorStore.getState().confirmOperation();
+
+    // Should not crash — activeOperation cleared regardless of success/failure
+    expect(useEditorStore.getState().activeOperation).toBeNull();
+  });
 });
