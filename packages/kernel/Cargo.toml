@@ -7,6 +7,11 @@ description = "Parametric CAD kernel for blockCAD"
 [lib]
 crate-type = ["cdylib", "rlib"]
 
+[[bin]]
+name = "blockcad-server"
+path = "src/bin/server.rs"
+required-features = ["server"]
+
 [features]
 default = ["client"]
 client = []

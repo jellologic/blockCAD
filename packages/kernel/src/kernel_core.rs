@@ -68,7 +68,7 @@ impl KernelCore {
     }
 
     /// Build a tessellated mesh from the current model state.
-    fn build_mesh(
+    pub fn build_mesh(
         &mut self,
         chord_tolerance: f64,
         angle_tolerance: f64,
