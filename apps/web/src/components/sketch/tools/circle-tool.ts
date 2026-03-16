@@ -18,6 +18,7 @@ export function handleCircleClick(clickPos: SketchPoint2D): void {
 
     if (radius < 0.1) return; // Too small
 
+    store.beginUndoBatch();
     const centerId = store.genSketchEntityId();
     store.addSketchEntity({ type: "point", id: centerId, position: center });
 
@@ -25,6 +26,6 @@ export function handleCircleClick(clickPos: SketchPoint2D): void {
     store.addSketchEntity({ type: "circle", id: circleId, centerId, radius });
 
     store.clearPendingPoints();
-    store.setSketchTool(null);
+    store.endUndoBatch();
   }
 }

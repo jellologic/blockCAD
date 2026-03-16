@@ -36,9 +36,12 @@ describe("rectangle tool", () => {
     expect(vConstraints).toHaveLength(2);
   });
 
-  it("deactivates tool after rectangle creation", () => {
+  it("keeps tool active after rectangle creation (chain mode)", () => {
     handleRectangleClick({ x: 0, y: 0 });
     handleRectangleClick({ x: 10, y: 5 });
-    expect(useEditorStore.getState().sketchSession!.activeTool).toBeNull();
+    // Tool stays active for chaining (SolidWorks behavior)
+    expect(useEditorStore.getState().sketchSession!.activeTool).toBe("rectangle");
+    // Pending points cleared for next rectangle
+    expect(useEditorStore.getState().sketchSession!.pendingPoints).toHaveLength(0);
   });
 });

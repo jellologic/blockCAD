@@ -8,7 +8,7 @@ describe("dimension tool", () => {
       kernel: null, meshData: null, features: [], isLoading: true, error: null,
       mode: "view", selectedFeatureId: null, selectedFaceIndex: null,
       hoveredFaceIndex: null, wireframe: false, showEdges: true,
-      activeOperation: null, sketchSession: null,
+      activeOperation: null, sketchSession: null, sketchSolver: null, sketchDofStatus: null,
     });
     await useEditorStore.getState().initKernel();
     useEditorStore.getState().enterSketchMode("front");
@@ -21,22 +21,33 @@ describe("dimension tool", () => {
     useEditorStore.getState().setSketchTool("dimension");
   });
 
-  it("clicking near a line shows dimension input", () => {
-    handleDimensionClick({ x: 5, y: 0.5 }); // near the line midpoint
-    const session = useEditorStore.getState().sketchSession!;
-    expect(session.dimensionInput).not.toBeNull();
-    expect(session.dimensionInput!.kind).toBe("distance");
-    expect(session.dimensionInput!.entityIds).toEqual(["p0", "p1"]);
+  it("clicking near a line sets dimensionPending, second click shows input", () => {
+    // First click: detect entity → sets pending
+    handleDimensionClick({ x: 5, y: 0.5 });
+    const session1 = useEditorStore.getState().sketchSession!;
+    expect(session1.dimensionPending).not.toBeNull();
+    expect(session1.dimensionPending!.kind).toBe("distance");
+
+    // Second click: placement → shows input
+    handleDimensionClick({ x: 5, y: 3 });
+    const session2 = useEditorStore.getState().sketchSession!;
+    expect(session2.dimensionInput).not.toBeNull();
+    expect(session2.dimensionInput!.kind).toBe("distance");
   });
 
-  it("clicking far from line does not show input", () => {
+  it("clicking far from line does not set pending", () => {
     handleDimensionClick({ x: 50, y: 50 }); // far away
     const session = useEditorStore.getState().sketchSession!;
+    expect(session.dimensionPending).toBeNull();
     expect(session.dimensionInput).toBeNull();
   });
 
   it("confirmDimension creates constraint with value", () => {
+    // First click: entity detection
     handleDimensionClick({ x: 5, y: 0.5 });
+    // Second click: placement
+    handleDimensionClick({ x: 5, y: 3 });
+    // Confirm with value
     useEditorStore.getState().confirmDimension(25);
     const session = useEditorStore.getState().sketchSession!;
     expect(session.dimensionInput).toBeNull();

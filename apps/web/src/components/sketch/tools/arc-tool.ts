@@ -49,6 +49,7 @@ export function handleArcClick(clickPos: SketchPoint2D): void {
       return; // collinear points, can't make arc
     }
 
+    store.beginUndoBatch();
     const centerId = store.genSketchEntityId();
     const startId = store.genSketchEntityId();
     const endId = store.genSketchEntityId();
@@ -67,6 +68,6 @@ export function handleArcClick(clickPos: SketchPoint2D): void {
     });
 
     store.clearPendingPoints();
-    store.setSketchTool(null);
+    store.endUndoBatch();
   }
 }

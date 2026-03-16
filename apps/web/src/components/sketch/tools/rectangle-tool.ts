@@ -12,6 +12,8 @@ export function handleRectangleClick(clickPos: SketchPoint2D): void {
     const corner1 = session.pendingPoints[0]!;
     const corner2 = clickPos;
 
+    store.beginUndoBatch();
+
     // Create 4 corner points
     const p0Id = store.genSketchEntityId();
     const p1Id = store.genSketchEntityId();
@@ -73,6 +75,6 @@ export function handleRectangleClick(clickPos: SketchPoint2D): void {
     });
 
     store.clearPendingPoints();
-    store.setSketchTool(null);
+    store.endUndoBatch();
   }
 }

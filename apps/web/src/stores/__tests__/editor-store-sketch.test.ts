@@ -8,16 +8,17 @@ describe("editor store - sketch mode", () => {
       kernel: null, meshData: null, features: [], isLoading: true, error: null,
       mode: "view", selectedFeatureId: null, selectedFaceIndex: null,
       hoveredFaceIndex: null, wireframe: false, showEdges: true,
-      activeOperation: null, sketchSession: null,
+      activeOperation: null, sketchSession: null, sketchSolver: null, sketchDofStatus: null,
     });
     await useEditorStore.getState().initKernel();
   });
 
-  it("enterSketchMode creates session with front plane", () => {
+  it("enterSketchMode creates session and solver", () => {
     useEditorStore.getState().enterSketchMode("front");
     const state = useEditorStore.getState();
     expect(state.mode).toBe("sketch");
     expect(state.sketchSession).not.toBeNull();
+    expect(state.sketchSolver).not.toBeNull();
     expect(state.sketchSession!.planeId).toBe("front");
     expect(state.sketchSession!.entities).toEqual([]);
     expect(state.sketchSession!.constraints).toEqual([]);
@@ -131,6 +132,41 @@ describe("editor store - sketch mode", () => {
     expect(id1).toBe("se-0");
     expect(id2).toBe("se-1");
     expect(id3).toBe("se-2");
+  });
+
+  it("addSketchConstraint triggers solver and updates DOF", () => {
+    useEditorStore.getState().enterSketchMode("front");
+    // Add two points
+    useEditorStore.getState().addSketchEntity({
+      type: "point", id: "se-0", position: { x: 0, y: 0 }
+    });
+    useEditorStore.getState().addSketchEntity({
+      type: "point", id: "se-1", position: { x: 8, y: 0.5 }
+    });
+    useEditorStore.getState().addSketchEntity({
+      type: "line", id: "se-2", startId: "se-0", endId: "se-1"
+    });
+
+    // Add a horizontal constraint — should trigger solve
+    useEditorStore.getState().addSketchConstraint({
+      id: "sc-0", kind: "horizontal", entityIds: ["se-2"]
+    });
+
+    const session = useEditorStore.getState().sketchSession!;
+    // After solving, the second point's y should be close to the first point's y (horizontal)
+    const p1 = session.entities.find(e => e.id === "se-1");
+    if (p1?.type === "point") {
+      expect(Math.abs(p1.position.y)).toBeLessThan(0.5);
+    }
+    // DOF status should be set
+    expect(useEditorStore.getState().sketchDofStatus).not.toBeNull();
+  });
+
+  it("exitSketchMode disposes solver", () => {
+    useEditorStore.getState().enterSketchMode("front");
+    expect(useEditorStore.getState().sketchSolver).not.toBeNull();
+    useEditorStore.getState().exitSketchMode(false);
+    expect(useEditorStore.getState().sketchSolver).toBeNull();
   });
 
   it("addPendingPoint and clearPendingPoints work", () => {

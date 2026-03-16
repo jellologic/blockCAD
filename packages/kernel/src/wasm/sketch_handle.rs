@@ -7,6 +7,7 @@ use crate::sketch::constraint::{Constraint, ConstraintKind};
 use crate::sketch::entity::{SketchEntity, SketchEntityId};
 use crate::sketch::solver_bridge::build_constraint_graph;
 use crate::sketch::Sketch;
+use crate::solver::dof::{analyze_dof, DofStatus};
 use crate::solver::newton_raphson::{solve, SolverConfig};
 
 /// WASM handle for sketch editing operations.
@@ -319,6 +320,29 @@ impl SketchHandle {
         }
         serde_json::to_string(&entities)
             .map_err(|e| -> JsValue { KernelError::Serialization(e.to_string()).into() })
+    }
+
+    /// Get the DOF status of the sketch as JSON.
+    /// Returns: {"status":"fully_constrained","dof":0} or similar.
+    pub fn dof_status(&self) -> Result<String, JsValue> {
+        let (graph, _var_map) =
+            build_constraint_graph(&self.sketch).map_err(|e| -> JsValue { e.into() })?;
+        let status = analyze_dof(&graph);
+        let json = match status {
+            DofStatus::FullyConstrained => {
+                r#"{"status":"fully_constrained","dof":0}"#.to_string()
+            }
+            DofStatus::UnderConstrained { dof } => {
+                format!(r#"{{"status":"under_constrained","dof":{}}}"#, dof)
+            }
+            DofStatus::OverConstrained { redundant } => {
+                format!(
+                    r#"{{"status":"over_constrained","redundant":{}}}"#,
+                    redundant
+                )
+            }
+        };
+        Ok(json)
     }
 
     /// Update a point entity's position (for dragging). Takes entity index, new x, new y.

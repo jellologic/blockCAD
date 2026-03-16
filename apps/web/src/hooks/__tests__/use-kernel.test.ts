@@ -17,6 +17,8 @@ describe("editor store", () => {
       wireframe: false,
       showEdges: true,
       activeOperation: null,
+      sketchSolver: null,
+      sketchDofStatus: null,
     });
   });
 

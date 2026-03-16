@@ -44,15 +44,17 @@ export function HeadsUpToolbar() {
   const toggleEdges = useEditorStore((s) => s.toggleEdges);
   const mode = useEditorStore((s) => s.mode);
   const setMode = useEditorStore((s) => s.setMode);
+  const setCameraTarget = useEditorStore((s) => s.setCameraTarget);
+  const fitAll = useEditorStore((s) => s.fitAll);
 
   return (
     <div className="absolute left-1/2 top-2 z-10 flex -translate-x-1/2 items-center gap-0.5 rounded-md border border-white/10 bg-black/50 px-1.5 py-0.5 backdrop-blur-sm">
       {/* View orientations */}
-      <HudButton icon={Square} title="Front (1)" onClick={() => {}} />
-      <HudButton icon={ArrowUp} title="Top (5)" onClick={() => {}} />
-      <HudButton icon={ArrowRight} title="Right (3)" onClick={() => {}} />
-      <HudButton icon={Box} title="Isometric (0)" onClick={() => {}} />
-      <HudButton icon={Maximize2} title="Fit All" onClick={() => {}} />
+      <HudButton icon={Square} title="Front (1)" onClick={() => setCameraTarget([0, 0, 30])} />
+      <HudButton icon={ArrowUp} title="Top (5)" onClick={() => setCameraTarget([0, 30, 0])} />
+      <HudButton icon={ArrowRight} title="Right (3)" onClick={() => setCameraTarget([30, 0, 0])} />
+      <HudButton icon={Box} title="Isometric (0)" onClick={() => setCameraTarget([20, 15, 20])} />
+      <HudButton icon={Maximize2} title="Fit All" onClick={fitAll} />
 
       <div className="mx-1 h-4 w-px bg-white/20" />
 

@@ -10,6 +10,7 @@ const PLANE_NAMES: Record<string, string> = {
 export function SketchPropertyPanel() {
   const sketchSession = useEditorStore((s) => s.sketchSession);
   const exitSketchMode = useEditorStore((s) => s.exitSketchMode);
+  const dofStatus = useEditorStore((s) => s.sketchDofStatus);
 
   if (!sketchSession) return null;
 
@@ -27,17 +28,25 @@ export function SketchPropertyPanel() {
   ).length;
   const constraintCount = sketchSession.constraints.length;
 
-  // Simple DOF heuristic
-  const equationCount = constraintCount; // each constraint ~ 1 equation (simplified)
-  const dof = Math.max(0, pointCount * 2 - equationCount);
-  const status =
-    constraintCount === 0
-      ? "Not Constrained"
-      : dof === 0
-        ? "Fully Defined"
-        : `Under Defined (${dof} DOF)`;
-  const statusColor =
-    dof === 0 ? "var(--cad-icon-sketch)" : "#4488ff"; // green if fully defined, blue if not
+  // Use real DOF from solver, fall back to heuristic
+  let status: string;
+  let statusColor: string;
+  if (dofStatus === "fully_constrained") {
+    status = "Fully Defined";
+    statusColor = "var(--cad-icon-sketch)";
+  } else if (dofStatus === "over_constrained") {
+    status = "Over Constrained";
+    statusColor = "#cc2222";
+  } else if (dofStatus === "under_constrained") {
+    status = "Under Defined";
+    statusColor = "#4488ff";
+  } else if (constraintCount === 0 && pointCount === 0) {
+    status = "Empty";
+    statusColor = "var(--cad-text-muted)";
+  } else {
+    status = "Not Constrained";
+    statusColor = "#4488ff";
+  }
 
   return (
     <div className="flex h-full flex-col bg-[var(--cad-bg-panel-alt)] border-r border-[var(--cad-border)]">
