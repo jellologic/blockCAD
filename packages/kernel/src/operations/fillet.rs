@@ -68,7 +68,7 @@ pub fn fillet_edges(brep: &BRep, params: &FilletParams) -> KernelResult<BRep> {
         }
     }
 
-    // Build a map of vertex modifications: VertexId -> new Pt3
+    // Map VertexId → new position for vertices on the two faces adjacent to each filleted edge.
     let mut vertex_mods: std::collections::HashMap<VertexId, Pt3> =
         std::collections::HashMap::new();
 
@@ -132,7 +132,9 @@ pub fn fillet_edges(brep: &BRep, params: &FilletParams) -> KernelResult<BRep> {
         let tb_start = se.start + offset_b * trim;
         let tb_end = se.end + offset_b * trim;
 
-        // Record vertex modifications (trim face edges back)
+        // Record vertex modifications for the two adjacent faces.
+        // vertex_a_start/end are the VertexIds on face A at the shared edge endpoints.
+        // vertex_b_start/end are the VertexIds on face B at the same geometric positions.
         vertex_mods.insert(se.vertex_a_start, ta_start);
         vertex_mods.insert(se.vertex_a_end, ta_end);
         vertex_mods.insert(se.vertex_b_start, tb_start);
@@ -162,19 +164,27 @@ pub fn fillet_edges(brep: &BRep, params: &FilletParams) -> KernelResult<BRep> {
         // trim point on face A to the trim point on face B.
         let arc_points_at = |edge_pt: Pt3| -> Vec<Pt3> {
             let center = edge_pt + bisector * center_dist;
-            // Start direction: from center toward the trim point on face A
             let start_dir = (edge_pt + offset_a * trim - center).normalize();
-            // End direction: from center toward the trim point on face B
-            let end_dir = (edge_pt + offset_b * trim - center).normalize();
-            // Tangent vector for the arc (perpendicular to start_dir in the arc plane)
             let arc_tangent = edge_dir.cross(&start_dir).normalize();
+
+            // Exact trim points — the first/last arc points MUST match the face vertices
+            let trim_a = edge_pt + offset_a * trim;
+            let trim_b = edge_pt + offset_b * trim;
 
             let mut pts = Vec::with_capacity(FILLET_SEGMENTS + 1);
             for seg in 0..=FILLET_SEGMENTS {
-                let t = seg as f64 / FILLET_SEGMENTS as f64;
-                let angle = t * sweep_angle;
-                let pt = center + start_dir * (r * angle.cos()) + arc_tangent * (r * angle.sin());
-                pts.push(pt);
+                if seg == 0 {
+                    // First point: exactly the trim point on face A
+                    pts.push(trim_a);
+                } else if seg == FILLET_SEGMENTS {
+                    // Last point: exactly the trim point on face B
+                    pts.push(trim_b);
+                } else {
+                    let t = seg as f64 / FILLET_SEGMENTS as f64;
+                    let angle = t * sweep_angle;
+                    let pt = center + start_dir * (r * angle.cos()) + arc_tangent * (r * angle.sin());
+                    pts.push(pt);
+                }
             }
             pts
         };
