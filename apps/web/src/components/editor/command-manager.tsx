@@ -252,6 +252,13 @@ export function CommandManager() {
                   <RibbonButton icon={Construction} label="Constr." size="small" disabled={mode !== "sketch"} testId="tool-construction" onClick={() => {/* TODO: toggle construction on selected entity */}} />
                 </div>
               </RibbonGroup>
+              <RibbonGroup label="Pattern">
+                <div className="flex flex-col gap-0.5">
+                  <RibbonButton icon={Grid3x3} label="Linear" size="small" testId="tool-sketch-linear-pattern" disabled={mode !== "sketch"} active={sketchSession?.activeTool === "sketch-linear-pattern" as any} onClick={() => setSketchTool("sketch-linear-pattern" as any)} />
+                  <RibbonButton icon={RefreshCw} label="Circular" size="small" testId="tool-sketch-circular-pattern" disabled={mode !== "sketch"} active={sketchSession?.activeTool === "sketch-circular-pattern" as any} onClick={() => setSketchTool("sketch-circular-pattern" as any)} />
+                  <RibbonButton icon={BoxSelect} label="Convert" size="small" testId="tool-convert-entities" disabled={mode !== "sketch"} active={sketchSession?.activeTool === "convert-entities" as any} onClick={() => setSketchTool("convert-entities" as any)} />
+                </div>
+              </RibbonGroup>
               {/* Confirm / Cancel — always visible in sketch mode */}
               {mode === "sketch" && (
                 <RibbonGroup label="Sketch">
