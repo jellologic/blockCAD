@@ -313,3 +313,15 @@ def stress_octagon():
 def stress_hexagon():
     """Regular hexagon (6 vertices, circumradius=5) extruded 5mm."""
     return load_stl("stress_hexagon"), load_kernel_props("stress_hexagon")
+
+
+@pytest.fixture
+def stress_tiny_fillet():
+    """10x5x7 box with tiny fillet r=0.1 on edge 0."""
+    return load_stl("stress_tiny_fillet"), load_kernel_props("stress_tiny_fillet")
+
+
+@pytest.fixture
+def stress_high_count_pattern():
+    """2x2x2 box patterned 10x along X with spacing 3."""
+    return load_stl("stress_high_count_pattern"), load_kernel_props("stress_high_count_pattern")

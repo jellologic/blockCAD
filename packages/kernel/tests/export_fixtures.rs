@@ -1678,3 +1678,54 @@ fn export_stress_hexagon_fixture() {
     assert!((props.volume - expected_volume).abs() < 5.0,
         "Hexagon extrude volume ({}) should be ~{:.1}", props.volume, expected_volume);
 }
+
+#[test]
+fn export_stress_tiny_fillet_fixture() {
+    let mut tree = build_sketch_extrude_tree(7.0);
+    tree.push(Feature::new("f1".into(), "Fillet".into(), FeatureKind::Fillet,
+        FeatureParams::Fillet(FilletParams { edge_indices: vec![0], radius: 0.1 })));
+    let brep = evaluate(&mut tree).unwrap();
+    let mesh = tessellate_brep(&brep, &TessellationParams::default()).unwrap();
+    let stl = export_stl_binary(&mesh);
+    let props = compute_mass_properties(&mesh);
+    write_fixture("stress_tiny_fillet", &stl, &props);
+    assert!((props.volume - 350.0).abs() < 1.0,
+        "Tiny fillet volume should be ~350, got {}", props.volume);
+}
+
+#[test]
+fn export_stress_high_count_pattern_fixture() {
+    let mut sketch = Sketch::new(Plane::xy(0.0));
+    let p0 = sketch.add_entity(SketchEntity::Point { position: Pt2::new(0.0, 0.0) });
+    let p1 = sketch.add_entity(SketchEntity::Point { position: Pt2::new(2.0, 0.0) });
+    let p2 = sketch.add_entity(SketchEntity::Point { position: Pt2::new(2.0, 2.0) });
+    let p3 = sketch.add_entity(SketchEntity::Point { position: Pt2::new(0.0, 2.0) });
+    let b = sketch.add_entity(SketchEntity::Line { start: p0, end: p1 });
+    let r = sketch.add_entity(SketchEntity::Line { start: p1, end: p2 });
+    let t = sketch.add_entity(SketchEntity::Line { start: p2, end: p3 });
+    let l = sketch.add_entity(SketchEntity::Line { start: p3, end: p0 });
+    sketch.add_constraint(Constraint::new(ConstraintKind::Fixed, vec![p0]));
+    sketch.add_constraint(Constraint::new(ConstraintKind::Horizontal, vec![b]));
+    sketch.add_constraint(Constraint::new(ConstraintKind::Horizontal, vec![t]));
+    sketch.add_constraint(Constraint::new(ConstraintKind::Vertical, vec![r]));
+    sketch.add_constraint(Constraint::new(ConstraintKind::Vertical, vec![l]));
+    sketch.add_constraint(Constraint::new(ConstraintKind::Distance { value: 2.0 }, vec![p0, p1]));
+    sketch.add_constraint(Constraint::new(ConstraintKind::Distance { value: 2.0 }, vec![p1, p2]));
+    let mut tree = FeatureTree::new();
+    tree.push(Feature::new("s1".into(), "Sketch".into(), FeatureKind::Sketch, FeatureParams::Placeholder));
+    tree.sketches.insert(0, sketch);
+    tree.push(Feature::new("e1".into(), "Extrude".into(), FeatureKind::Extrude,
+        FeatureParams::Extrude(ExtrudeParams::blind(Vec3::new(0.0, 0.0, 1.0), 2.0))));
+    tree.push(Feature::new("lp1".into(), "LinearPattern".into(), FeatureKind::LinearPattern,
+        FeatureParams::LinearPattern(LinearPatternParams {
+            direction: Vec3::new(1.0, 0.0, 0.0), spacing: 3.0, count: 10,
+            direction2: None, spacing2: None, count2: None,
+        })));
+    let brep = evaluate(&mut tree).unwrap();
+    let mesh = tessellate_brep(&brep, &TessellationParams::default()).unwrap();
+    let stl = export_stl_binary(&mesh);
+    let props = compute_mass_properties(&mesh);
+    write_fixture("stress_high_count_pattern", &stl, &props);
+    assert!((props.volume - 80.0).abs() < 2.0,
+        "High count pattern volume should be ~80, got {}", props.volume);
+}
