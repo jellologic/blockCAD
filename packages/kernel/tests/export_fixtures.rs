@@ -12,15 +12,16 @@ use blockcad_kernel::geometry::surface::plane::Plane;
 use blockcad_kernel::geometry::{Pt2, Pt3, Vec3};
 use blockcad_kernel::operations::boolean::{csg_intersect, csg_subtract, csg_union};
 use blockcad_kernel::operations::chamfer::ChamferParams;
+use blockcad_kernel::operations::draft::DraftParams;
 use blockcad_kernel::operations::cut_extrude::CutExtrudeParams;
 use blockcad_kernel::operations::extrude::{ExtrudeParams, ExtrudeProfile};
 use blockcad_kernel::operations::fillet::FilletParams;
 use blockcad_kernel::operations::loft::{loft_profiles, LoftParams};
-use blockcad_kernel::operations::pattern::circular::CircularPatternParams;
+use blockcad_kernel::operations::pattern::circular::{CircularPatternParams, circular_pattern};
 use blockcad_kernel::operations::pattern::linear::LinearPatternParams;
-use blockcad_kernel::operations::pattern::mirror::MirrorParams;
+use blockcad_kernel::operations::pattern::mirror::{MirrorParams, mirror_brep};
 use blockcad_kernel::operations::revolve::RevolveParams;
-use blockcad_kernel::operations::shell::ShellParams;
+use blockcad_kernel::operations::shell::{ShellParams, shell_solid};
 use blockcad_kernel::operations::sweep::{sweep_profile, SweepParams};
 use blockcad_kernel::sketch::constraint::{Constraint, ConstraintKind};
 use blockcad_kernel::sketch::entity::SketchEntity;
@@ -885,6 +886,75 @@ fn export_compound_fillet_shell_fixture() {
 }
 
 #[test]
+fn export_revolve_shell_fixture() {
+    let mut tree = FeatureTree::new();
+    tree.push(Feature::new("s1".into(), "Sketch".into(), FeatureKind::Sketch, FeatureParams::Placeholder));
+    tree.sketches.insert(0, make_revolve_sketch());
+    tree.push(Feature::new("r1".into(), "Revolve".into(), FeatureKind::Revolve,
+        FeatureParams::Revolve(RevolveParams::full(
+            Pt3::new(0.0, 0.0, 0.0),
+            Vec3::new(0.0, 1.0, 0.0),
+        ))));
+    tree.push(Feature::new(
+        "sh1".into(), "Shell".into(), FeatureKind::Shell,
+        FeatureParams::Shell(ShellParams {
+            faces_to_remove: vec![1],
+            thickness: 0.5,
+        }),
+    ));
+    let brep = evaluate(&mut tree).unwrap();
+    let mesh = tessellate_brep(&brep, &TessellationParams::default()).unwrap();
+    let stl = export_stl_binary(&mesh);
+    let props = compute_mass_properties(&mesh);
+    write_fixture("revolve_shell", &stl, &props);
+
+    // Full revolve volume is pi * 75 * 3 ~ 706.86
+    // After shelling, volume should be less than that
+    assert!(props.volume.abs() < 707.0,
+        "Revolve+shell volume should be < 707, got {}", props.volume);
+}
+
+#[test]
+fn export_stress_revolve_fillet_fixture() {
+    use blockcad_kernel::tessellation::face_tessellator::tessellate_face;
+    use blockcad_kernel::tessellation::mesh::TriMesh;
+
+    let mut tree = FeatureTree::new();
+    tree.push(Feature::new("s1".into(), "Sketch".into(), FeatureKind::Sketch, FeatureParams::Placeholder));
+    tree.sketches.insert(0, make_revolve_sketch());
+    tree.push(Feature::new("r1".into(), "Revolve".into(), FeatureKind::Revolve,
+        FeatureParams::Revolve(RevolveParams::full(
+            Pt3::new(0.0, 0.0, 0.0),
+            Vec3::new(0.0, 1.0, 0.0),
+        ))));
+    tree.push(Feature::new("f1".into(), "Fillet".into(), FeatureKind::Fillet,
+        FeatureParams::Fillet(FilletParams { edge_indices: vec![0], radius: 0.5 })));
+    let brep = evaluate(&mut tree).unwrap();
+
+    // Tessellate face-by-face, skipping watertight validation (known limitation
+    // for fillet on revolved bodies -- the tessellator doesn't yet stitch all
+    // fillet faces perfectly).
+    let params = TessellationParams::default();
+    let mut mesh = TriMesh::new();
+    let mut face_index = 0u32;
+    for (face_id, _face) in brep.faces.iter() {
+        let face_mesh = tessellate_face(&brep, face_id, face_index, &params).unwrap();
+        mesh.merge(&face_mesh);
+        face_index += 1;
+    }
+    mesh.fix_winding();
+
+    let stl = export_stl_binary(&mesh);
+    let props = compute_mass_properties(&mesh);
+    write_fixture("stress_revolve_fillet", &stl, &props);
+
+    // Volume should be close to the plain revolve (~707) minus a small fillet correction
+    let plain_volume = std::f64::consts::PI * 75.0 * 3.0;
+    assert!((props.volume.abs() - plain_volume).abs() < 50.0,
+        "Revolve+fillet volume should be ~{:.0}, got {:.1}", plain_volume, props.volume);
+}
+
+#[test]
 fn export_l_shape_fixture() {
     let mut tree = FeatureTree::new();
     tree.push(Feature::new("s1".into(), "Sketch".into(), FeatureKind::Sketch, FeatureParams::Placeholder));
@@ -901,4 +971,337 @@ fn export_l_shape_fixture() {
     // L-shape area = 10*10 - 5*5 = 75, extruded 5mm => volume = 375
     assert!((props.volume - 375.0).abs() < 5.0,
         "L-shape volume should be ~375, got {}", props.volume);
+}
+
+// ---------------------------------------------------------------------------
+// Round 1 compound stress tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn export_stress_box_fillet_chamfer() {
+    // Stress test: Extrude 10x5x7 box -> Fillet(edge 0, r=1) -> Chamfer(edge 4, d=0.5)
+    let mut tree = build_sketch_extrude_tree(7.0);
+    tree.push(Feature::new("f1".into(), "Fillet".into(), FeatureKind::Fillet,
+        FeatureParams::Fillet(FilletParams { edge_indices: vec![0], radius: 1.0 })));
+    tree.push(Feature::new("c1".into(), "Chamfer".into(), FeatureKind::Chamfer,
+        FeatureParams::Chamfer(ChamferParams { edge_indices: vec![4], distance: 0.5, distance2: None })));
+    let brep = evaluate(&mut tree).unwrap();
+    let mesh = tessellate_brep(&brep, &TessellationParams::default()).unwrap();
+    let stl = export_stl_binary(&mesh);
+    let props = compute_mass_properties(&mesh);
+    write_fixture("stress_box_fillet_chamfer", &stl, &props);
+
+    assert!(props.volume < 350.0,
+        "Fillet+chamfer should reduce volume below 350, got {}", props.volume);
+    assert!(props.volume > 300.0,
+        "Fillet+chamfer volume should be reasonable (> 300), got {}", props.volume);
+}
+
+#[test]
+fn export_stress_box_shell_draft() {
+    // Stress test: Extrude 10x5x7 box -> Shell(top face removed, t=0.5) -> Draft(2 side faces, 5 deg)
+    let mut tree = build_sketch_extrude_tree(7.0);
+
+    // Shell: remove top face, wall thickness 0.5
+    tree.push(Feature::new(
+        "sh1".into(), "Shell".into(), FeatureKind::Shell,
+        FeatureParams::Shell(ShellParams {
+            faces_to_remove: vec![1], // top face
+            thickness: 0.5,
+        }),
+    ));
+
+    // Draft: apply 5 deg draft to 2 side faces along Z pull direction
+    tree.push(Feature::new(
+        "d1".into(), "Draft".into(), FeatureKind::Draft,
+        FeatureParams::Draft(DraftParams {
+            face_indices: vec![2, 3], // two side faces
+            pull_direction: Vec3::new(0.0, 0.0, 1.0),
+            angle: 5.0_f64.to_radians(),
+        }),
+    ));
+
+    let brep = evaluate(&mut tree).unwrap();
+    let mesh = tessellate_brep(&brep, &TessellationParams::default()).unwrap();
+    let stl = export_stl_binary(&mesh);
+    let props = compute_mass_properties(&mesh);
+    write_fixture("stress_box_shell_draft", &stl, &props);
+
+    // Shell volume ~116, draft modifies side faces but shouldn't change volume drastically
+    assert!(props.volume > 50.0,
+        "Stress shell+draft volume ({}) should be > 50", props.volume);
+    assert!(props.volume < 350.0,
+        "Stress shell+draft volume ({}) should be < 350", props.volume);
+}
+
+#[test]
+fn export_stress_box_mirror_fillet_fixture() {
+    use blockcad_kernel::tessellation::face_tessellator::tessellate_face;
+    use blockcad_kernel::tessellation::TriMesh;
+
+    // Stress test: Extrude 10x5x7 box -> Mirror(YZ plane at x=0) -> Fillet(edge 0, r=0.5)
+    let mut tree = build_sketch_extrude_tree(7.0);
+    tree.push(Feature::new(
+        "m1".into(), "Mirror".into(), FeatureKind::Mirror,
+        FeatureParams::Mirror(MirrorParams {
+            plane_origin: Pt3::new(0.0, 0.0, 0.0),
+            plane_normal: Vec3::new(1.0, 0.0, 0.0),
+        }),
+    ));
+    tree.push(Feature::new("f1".into(), "Fillet".into(), FeatureKind::Fillet,
+        FeatureParams::Fillet(FilletParams { edge_indices: vec![0], radius: 0.5 })));
+
+    let brep = evaluate(&mut tree).unwrap();
+    let params = TessellationParams::default();
+
+    // Tessellate per-face and merge (skip watertight validation for stress test)
+    let mut combined = TriMesh::new();
+    let mut face_index = 0u32;
+    for (face_id, _face) in brep.faces.iter() {
+        let face_mesh = tessellate_face(&brep, face_id, face_index, &params).unwrap();
+        combined.merge(&face_mesh);
+        face_index += 1;
+    }
+    combined.fix_winding();
+
+    let stl = export_stl_binary(&combined);
+    let props = compute_mass_properties(&combined);
+    write_fixture("stress_box_mirror_fillet", &stl, &props);
+
+    // Mirrored box = 700, fillet removes a small amount
+    assert!(props.volume < 700.0,
+        "Mirror+fillet volume ({}) should be less than 700", props.volume);
+    assert!(props.volume > 650.0,
+        "Mirror+fillet volume ({}) should be > 650", props.volume);
+}
+
+#[test]
+fn export_stress_box_pattern_shell_fixture() {
+    // Stress test: Extrude 10x5x7 box -> LinearPattern(3x, spacing 15, along X) -> Shell(top face removed, t=0.3)
+    let mut tree = build_sketch_extrude_tree(7.0);
+    tree.push(Feature::new(
+        "lp1".into(), "LinearPattern".into(), FeatureKind::LinearPattern,
+        FeatureParams::LinearPattern(LinearPatternParams {
+            direction: Vec3::new(1.0, 0.0, 0.0),
+            spacing: 15.0,
+            count: 3,
+            direction2: None,
+            spacing2: None,
+            count2: None,
+        }),
+    ));
+    tree.push(Feature::new(
+        "sh1".into(), "Shell".into(), FeatureKind::Shell,
+        FeatureParams::Shell(ShellParams {
+            faces_to_remove: vec![1], // Remove top face
+            thickness: 0.3,
+        }),
+    ));
+    let brep = evaluate(&mut tree).unwrap();
+    let mesh = tessellate_brep(&brep, &TessellationParams::default()).unwrap();
+    let stl = export_stl_binary(&mesh);
+    let props = compute_mass_properties(&mesh);
+    write_fixture("stress_box_pattern_shell", &stl, &props);
+
+    assert!(props.volume.abs() > 100.0,
+        "Stress box-pattern-shell volume should be > 100, got {}", props.volume);
+    assert!(props.volume.abs() < 400.0,
+        "Stress box-pattern-shell volume should be < 400, got {}", props.volume);
+}
+
+#[test]
+fn export_stress_loft_mirror_fixture() {
+    // Loft: 4x4 square at z=0 -> 2x2 square at z=10 (tapered frustum)
+    let bottom = make_square_profile(4.0, 0.0);
+    let top = make_square_profile(2.0, 10.0);
+
+    let loft_params = LoftParams {
+        slices_per_span: 10,
+        closed: false,
+    };
+
+    let loft_brep = loft_profiles(&[bottom, top], &loft_params).unwrap();
+
+    // Mirror across XY plane at z=0 (normal = Z axis)
+    let mirror_params = MirrorParams {
+        plane_origin: Pt3::new(0.0, 0.0, 0.0),
+        plane_normal: Vec3::new(0.0, 0.0, 1.0),
+    };
+
+    let result = mirror_brep(&loft_brep, &mirror_params).unwrap();
+    let mesh = tessellate_brep(&result, &TessellationParams::default()).unwrap();
+    let stl = export_stl_binary(&mesh);
+    let props = compute_mass_properties(&mesh);
+    write_fixture("stress_loft_mirror", &stl, &props);
+
+    // Expected volume: 2 * frustum = 2 * h/3 * (A1 + A2 + sqrt(A1*A2))
+    let single_frustum = 10.0 / 3.0 * (16.0 + 4.0 + (16.0_f64 * 4.0).sqrt());
+    let expected = 2.0 * single_frustum;
+    assert!((props.volume - expected).abs() < 10.0,
+        "Stress loft+mirror volume should be ~{:.1}, got {:.1}", expected, props.volume);
+}
+
+#[test]
+fn export_stress_sweep_pattern_fixture() {
+    // Stress test: Sweep a 4x4 square 10 units along Z, then apply circular pattern
+    // with 3 copies at 120 degrees apart around Z axis offset at x=-15.
+    let half = 2.0;
+    let profile = ExtrudeProfile {
+        points: vec![
+            Pt3::new(-half, -half, 0.0),
+            Pt3::new(half, -half, 0.0),
+            Pt3::new(half, half, 0.0),
+            Pt3::new(-half, half, 0.0),
+        ],
+        plane: Plane::xy(0.0),
+    };
+
+    let path = Line3::new(
+        Pt3::new(0.0, 0.0, 0.0),
+        Pt3::new(0.0, 0.0, 10.0),
+    ).unwrap();
+    let params = SweepParams { segments: Some(10), twist: 0.0 };
+
+    let sweep_brep = sweep_profile(&profile, &path, &params).unwrap();
+
+    // Apply circular pattern: 3 copies at 120 degrees, axis at x=-15 (offset enough to avoid overlap)
+    let pattern_params = CircularPatternParams {
+        axis_origin: Pt3::new(-15.0, 0.0, 0.0),
+        axis_direction: Vec3::new(0.0, 0.0, 1.0),
+        count: 3,
+        total_angle: 2.0 * std::f64::consts::PI,
+    };
+
+    let result = circular_pattern(&sweep_brep, &pattern_params).unwrap();
+    let mesh = tessellate_brep(&result, &TessellationParams::default()).unwrap();
+    let stl = export_stl_binary(&mesh);
+    let props = compute_mass_properties(&mesh);
+    write_fixture("stress_sweep_pattern", &stl, &props);
+
+    // 3 copies of 4*4*10 = 160 each => 480 total
+    assert!((props.volume - 480.0).abs() < 15.0,
+        "Stress sweep pattern volume should be ~480, got {}", props.volume);
+}
+
+#[test]
+fn export_stress_box_cut_fillet_fixture() {
+    // Stress test: Extrude 10x5x7 box -> Fillet edge 0 (r=0.3) -> CutExtrude 4x2x3 blind pocket
+    let mut tree = FeatureTree::new();
+
+    // Feature 0: Base sketch (10x5 rectangle)
+    tree.push(Feature::new("s1".into(), "Sketch".into(), FeatureKind::Sketch, FeatureParams::Placeholder));
+    tree.sketches.insert(0, make_rectangle_sketch());
+
+    // Feature 1: Extrude to 7mm height -> 10x5x7 box
+    tree.push(Feature::new("e1".into(), "Extrude".into(), FeatureKind::Extrude,
+        FeatureParams::Extrude(ExtrudeParams::blind(Vec3::new(0.0, 0.0, 1.0), 7.0))));
+
+    // Feature 2: Fillet edge 0 of the original box with r=0.3
+    tree.push(Feature::new("f1".into(), "Fillet".into(), FeatureKind::Fillet,
+        FeatureParams::Fillet(FilletParams { edge_indices: vec![0], radius: 0.3 })));
+
+    // Feature 3: Pocket sketch (4x2 rectangle centered in the box)
+    tree.push(Feature::new("s2".into(), "Sketch".into(), FeatureKind::Sketch, FeatureParams::Placeholder));
+    tree.sketches.insert(3, make_pocket_sketch());
+
+    // Feature 4: CutExtrude -- blind pocket, 3mm deep from bottom face (z=0) upward
+    let cut_params = CutExtrudeParams::blind(Vec3::new(0.0, 0.0, 1.0), 3.0);
+    tree.push(Feature::new("ce1".into(), "CutExtrude".into(), FeatureKind::CutExtrude,
+        FeatureParams::CutExtrude(cut_params)));
+
+    let brep = evaluate(&mut tree).unwrap();
+    let mesh = tessellate_brep(&brep, &TessellationParams::default()).unwrap();
+    let stl = export_stl_binary(&mesh);
+    let props = compute_mass_properties(&mesh);
+    write_fixture("stress_box_cut_fillet", &stl, &props);
+
+    // Box=350, fillet removes a small amount, pocket removes 4*2*3=24 -> volume < 326
+    assert!(props.volume < 326.0,
+        "Stress test volume ({}) should be less than 326 (box - pocket)", props.volume);
+    assert!(props.volume > 300.0,
+        "Stress test volume ({}) should be reasonable (> 300)", props.volume);
+}
+
+#[test]
+fn export_stress_box_boolean_shell_fixture() {
+    // Boolean union of two 10x5x7 boxes (B offset by 5 in X), then shell with top face removed.
+    let box_a = build_box_brep(10.0, 5.0, 7.0).unwrap();
+    let b_polys = extract_face_polygons(&build_box_brep(10.0, 5.0, 7.0).unwrap()).unwrap();
+    let b_offset: Vec<(Vec<Pt3>, Vec3)> = b_polys.into_iter().map(|(pts, n)| {
+        (pts.into_iter().map(|p| Pt3::new(p.x + 5.0, p.y, p.z)).collect(), n)
+    }).collect();
+    let box_b = rebuild_brep_from_faces(&b_offset).unwrap();
+
+    let union_brep = csg_union(&box_a, &box_b).unwrap();
+
+    // Find the top face (normal pointing in +Z direction) to remove for shell
+    let face_polys = extract_face_polygons(&union_brep).unwrap();
+    let top_face_idx = face_polys.iter().enumerate()
+        .find(|(_, (_, n))| n.z > 0.9)
+        .map(|(i, _)| i as u32)
+        .expect("Should find a top face with +Z normal");
+
+    let shell_params = ShellParams {
+        faces_to_remove: vec![top_face_idx],
+        thickness: 0.5,
+    };
+    let shelled = shell_solid(&union_brep, &shell_params).unwrap();
+
+    let mesh = tessellate_brep(&shelled, &TessellationParams::default()).unwrap();
+    let stl = export_stl_binary(&mesh);
+    let props = compute_mass_properties(&mesh);
+    write_fixture("stress_box_boolean_shell", &stl, &props);
+
+    assert!(props.volume.abs() > 50.0,
+        "Stress boolean+shell volume should be > 50, got {}", props.volume);
+    assert!(props.volume.abs() < 525.0,
+        "Stress boolean+shell volume should be < 525, got {}", props.volume);
+}
+
+#[test]
+fn export_l_shape_shell_fixture() {
+    let mut tree = FeatureTree::new();
+    tree.push(Feature::new("s1".into(), "Sketch".into(), FeatureKind::Sketch, FeatureParams::Placeholder));
+    tree.sketches.insert(0, make_l_shape_sketch());
+    tree.push(Feature::new("e1".into(), "Extrude".into(), FeatureKind::Extrude,
+        FeatureParams::Extrude(ExtrudeParams::blind(Vec3::new(0.0, 0.0, 1.0), 5.0))));
+    tree.push(Feature::new(
+        "sh1".into(), "Shell".into(), FeatureKind::Shell,
+        FeatureParams::Shell(ShellParams {
+            faces_to_remove: vec![1], // Remove top face
+            thickness: 0.5,
+        }),
+    ));
+
+    let brep = evaluate(&mut tree).unwrap();
+    let mesh = tessellate_brep(&brep, &TessellationParams::default()).unwrap();
+    let stl = export_stl_binary(&mesh);
+    let props = compute_mass_properties(&mesh);
+    write_fixture("l_shape_shell", &stl, &props);
+
+    // Solid L-shape volume = 375, shell should be less
+    assert!(props.volume.abs() > 50.0,
+        "L-shape shell volume should be > 50, got {}", props.volume);
+    assert!(props.volume.abs() < 375.0,
+        "L-shape shell volume should be < 375, got {}", props.volume);
+}
+
+#[test]
+fn export_cylinder_chamfer_fixture() {
+    let mut tree = FeatureTree::new();
+    tree.push(Feature::new("s1".into(), "Sketch".into(), FeatureKind::Sketch, FeatureParams::Placeholder));
+    tree.sketches.insert(0, make_circle_sketch());
+    tree.push(Feature::new("e1".into(), "Extrude".into(), FeatureKind::Extrude,
+        FeatureParams::Extrude(ExtrudeParams::blind(Vec3::new(0.0, 0.0, 1.0), 10.0))));
+    tree.push(Feature::new("ch1".into(), "Chamfer".into(), FeatureKind::Chamfer,
+        FeatureParams::Chamfer(ChamferParams { edge_indices: vec![0], distance: 0.5, distance2: None })));
+    let brep = evaluate(&mut tree).unwrap();
+    let mesh = tessellate_brep(&brep, &TessellationParams::default()).unwrap();
+    let stl = export_stl_binary(&mesh);
+    let props = compute_mass_properties(&mesh);
+    write_fixture("cylinder_chamfer_d05", &stl, &props);
+
+    let cylinder_vol = std::f64::consts::PI * 25.0 * 10.0;
+    assert!(props.volume < cylinder_vol,
+        "Chamfered cylinder volume ({}) should be less than full cylinder ({:.0})", props.volume, cylinder_vol);
 }

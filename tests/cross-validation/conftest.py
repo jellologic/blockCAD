@@ -178,6 +178,78 @@ def through_hole():
 
 
 @pytest.fixture
+def revolve_shell():
+    """Full 360-degree revolve of rectangle around Y-axis, then shelled (t=0.5, 1 face removed)."""
+    return load_stl("revolve_shell"), load_kernel_props("revolve_shell")
+
+
+@pytest.fixture
+def stress_revolve_fillet():
+    """Full 360-degree revolve of rectangle around Y-axis, then fillet(edge 0, r=0.5)."""
+    return load_stl("stress_revolve_fillet"), load_kernel_props("stress_revolve_fillet")
+
+
+@pytest.fixture
 def l_shape():
     """L-shaped profile (10x10 minus 5x5 corner) extruded 5mm."""
     return load_stl("l_shape_extrude"), load_kernel_props("l_shape_extrude")
+
+
+@pytest.fixture
+def stress_box_fillet_chamfer():
+    """10x5x7 box with r=1 fillet on edge 0, then d=0.5 chamfer on edge 4."""
+    return load_stl("stress_box_fillet_chamfer"), load_kernel_props("stress_box_fillet_chamfer")
+
+
+@pytest.fixture
+def stress_box_shell_draft():
+    """10x5x7 box -> Shell(top removed, t=0.5) -> Draft(2 side faces, 5 deg)."""
+    return load_stl("stress_box_shell_draft"), load_kernel_props("stress_box_shell_draft")
+
+
+@pytest.fixture
+def stress_box_mirror_fillet():
+    """10x5x7 box mirrored across YZ plane, then fillet(edge 0, r=0.5)."""
+    return load_stl("stress_box_mirror_fillet"), load_kernel_props("stress_box_mirror_fillet")
+
+
+@pytest.fixture
+def stress_box_pattern_shell():
+    """10x5x7 box patterned 3x along X (spacing 15), then shelled (top removed, t=0.3)."""
+    return load_stl("stress_box_pattern_shell"), load_kernel_props("stress_box_pattern_shell")
+
+
+@pytest.fixture
+def stress_loft_mirror():
+    """Loft (4x4 -> 2x2, z=0..10) mirrored across XY plane at z=0."""
+    return load_stl("stress_loft_mirror"), load_kernel_props("stress_loft_mirror")
+
+
+@pytest.fixture
+def stress_sweep_pattern():
+    """4x4 square swept 10 units along Z, then circular pattern 3x at 120 deg around Z (axis at x=-15)."""
+    return load_stl("stress_sweep_pattern"), load_kernel_props("stress_sweep_pattern")
+
+
+@pytest.fixture
+def stress_box_cut_fillet():
+    """10x5x7 box with 4x2x3 blind pocket, then r=0.3 fillet on outer box edge."""
+    return load_stl("stress_box_cut_fillet"), load_kernel_props("stress_box_cut_fillet")
+
+
+@pytest.fixture
+def stress_box_boolean_shell():
+    """Union of two 10x5x7 boxes (offset 5 in X), then shelled (t=0.5, top removed)."""
+    return load_stl("stress_box_boolean_shell"), load_kernel_props("stress_box_boolean_shell")
+
+
+@pytest.fixture
+def l_shape_shell():
+    """L-shaped profile (10x10 minus 5x5 corner) extruded 5mm, shelled t=0.5, top removed."""
+    return load_stl("l_shape_shell"), load_kernel_props("l_shape_shell")
+
+
+@pytest.fixture
+def cylinder_chamfer():
+    """Cylinder r=5, h=10 with d=0.5 chamfer on edge 0."""
+    return load_stl("cylinder_chamfer_d05"), load_kernel_props("cylinder_chamfer_d05")
