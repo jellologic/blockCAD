@@ -26,4 +26,12 @@ pub enum SketchEntity {
         control_points: Vec<SketchEntityId>,
         degree: usize,
     },
+    /// Ellipse defined by center point, two radii, and rotation angle.
+    Ellipse {
+        center: SketchEntityId,
+        radius_x: f64,
+        radius_y: f64,
+        /// Rotation of the major axis from the sketch U-axis (radians).
+        rotation: f64,
+    },
 }

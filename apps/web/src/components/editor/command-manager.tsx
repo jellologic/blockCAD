@@ -5,6 +5,7 @@ import {
   Eye, Layers, Network, Maximize2, BoxSelect, Pencil, Check, X, RulerIcon,
   Download, Plus, Link, FileText, Combine,
   Scissors, ArrowUpRight, Copy, FlipHorizontal, Construction,
+  Hexagon, Disc,
 } from "lucide-react";
 import { RibbonButton } from "./ribbon-button";
 import { useEditorStore } from "@/stores/editor-store";
@@ -203,6 +204,13 @@ export function CommandManager() {
                   active={sketchSession?.activeTool === "rectangle"}
                   onClick={() => setSketchTool("rectangle")}
                 />
+              </RibbonGroup>
+              <RibbonGroup label="Shapes">
+                <div className="flex flex-col gap-0.5">
+                  <RibbonButton icon={Disc} label="Ellipse" size="small" testId="tool-ellipse" disabled={mode !== "sketch"} active={sketchSession?.activeTool === "ellipse" as any} onClick={() => setSketchTool("ellipse" as any)} />
+                  <RibbonButton icon={Hexagon} label="Polygon" size="small" testId="tool-polygon" disabled={mode !== "sketch"} active={sketchSession?.activeTool === "polygon" as any} onClick={() => setSketchTool("polygon" as any)} />
+                  <RibbonButton icon={Minus} label="Slot" size="small" testId="tool-slot" disabled={mode !== "sketch"} active={sketchSession?.activeTool === "slot" as any} onClick={() => setSketchTool("slot" as any)} />
+                </div>
               </RibbonGroup>
               <RibbonGroup label="Constrain">
                 <div className="flex flex-col gap-0.5">

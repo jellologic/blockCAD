@@ -48,6 +48,13 @@ pub fn build_constraint_graph(sketch: &Sketch) -> KernelResult<(ConstraintGraph,
                 // Spline control points are separate Point entities
                 var_map.insert(entity_id, vec![]);
             }
+            SketchEntity::Ellipse { radius_x, radius_y, .. } => {
+                // Center is a separate Point entity.
+                // Add variables for the two radii.
+                let rx = graph.variables.add(Variable::new(*radius_x));
+                let ry = graph.variables.add(Variable::new(*radius_y));
+                var_map.insert(entity_id, vec![rx, ry]);
+            }
         }
     }
 
