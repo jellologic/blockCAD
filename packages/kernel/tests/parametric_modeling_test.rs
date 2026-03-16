@@ -69,12 +69,10 @@ fn build_sketch_extrude_tree(w: f64, h: f64, depth: f64) -> FeatureTree {
         "extrude-1".into(),
         "Extrude Base".into(),
         FeatureKind::Extrude,
-        FeatureParams::Extrude(ExtrudeParams {
-            direction: Vec3::new(0.0, 0.0, 1.0),
+        FeatureParams::Extrude(ExtrudeParams::blind(
+            Vec3::new(0.0, 0.0, 1.0),
             depth,
-            symmetric: false,
-            draft_angle: 0.0,
-        }),
+        )),
     ));
 
     tree
@@ -195,12 +193,10 @@ fn test_triangle_extrusion() {
         "extrude-1".into(),
         "Extrude Triangle".into(),
         FeatureKind::Extrude,
-        FeatureParams::Extrude(ExtrudeParams {
-            direction: Vec3::new(0.0, 0.0, 1.0),
-            depth: 3.0,
-            symmetric: false,
-            draft_angle: 0.0,
-        }),
+        FeatureParams::Extrude(ExtrudeParams::blind(
+            Vec3::new(0.0, 0.0, 1.0),
+            3.0,
+        )),
     ));
 
     let brep = evaluate(&mut tree).unwrap();
@@ -280,11 +276,10 @@ fn test_sketch_revolve_pipeline() {
         "revolve-1".into(),
         "Revolve Full".into(),
         FeatureKind::Revolve,
-        FeatureParams::Revolve(RevolveParams {
-            axis_origin: Pt3::origin(),
-            axis_direction: Vec3::new(0.0, 0.0, 1.0),
-            angle: 2.0 * PI,
-        }),
+        FeatureParams::Revolve(RevolveParams::full(
+            Pt3::origin(),
+            Vec3::new(0.0, 0.0, 1.0),
+        )),
     ));
 
     let brep = evaluate(&mut tree).unwrap();

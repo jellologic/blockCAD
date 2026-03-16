@@ -15,7 +15,9 @@ pub enum FeatureParams {
     // Client operations
     Sketch(crate::sketch::Sketch),
     Extrude(crate::operations::extrude::ExtrudeParams),
+    CutExtrude(crate::operations::cut_extrude::CutExtrudeParams),
     Revolve(crate::operations::revolve::RevolveParams),
+    CutRevolve(crate::operations::revolve::RevolveParams),
     Fillet(crate::operations::fillet::FilletParams),
     Chamfer(crate::operations::chamfer::ChamferParams),
 
@@ -27,9 +29,9 @@ pub enum FeatureParams {
     Loft(serde_json::Value),
     Shell(serde_json::Value),
     Draft(serde_json::Value),
-    LinearPattern(serde_json::Value),
-    CircularPattern(serde_json::Value),
-    Mirror(serde_json::Value),
+    LinearPattern(crate::operations::pattern::linear::LinearPatternParams),
+    CircularPattern(crate::operations::pattern::circular::CircularPatternParams),
+    Mirror(crate::operations::pattern::mirror::MirrorParams),
 }
 
 #[cfg(test)]
@@ -46,13 +48,31 @@ mod tests {
     #[test]
     fn extrude_params_adjacently_tagged() {
         use crate::geometry::Vec3;
-        use crate::operations::extrude::ExtrudeParams;
+        use crate::operations::extrude::{EndCondition, ExtrudeParams, FromCondition};
 
         let p = FeatureParams::Extrude(ExtrudeParams {
             direction: Vec3::new(0.0, 0.0, 1.0),
             depth: 10.0,
             symmetric: false,
             draft_angle: 0.0,
+            end_condition: EndCondition::Blind,
+            direction2_enabled: false,
+            depth2: 0.0,
+            draft_angle2: 0.0,
+            end_condition2: EndCondition::Blind,
+            from_offset: 0.0,
+            up_to_next_depth: None,
+            thin_feature: false,
+            thin_wall_thickness: 0.0,
+            target_face_index: None,
+            surface_offset: 0.0,
+            target_vertex_position: None,
+            flip_side_to_cut: false,
+            cap_ends: false,
+            from_condition: FromCondition::SketchPlane,
+            from_face_index: None,
+            from_vertex_position: None,
+            contour_index: None,
         });
         let json = serde_json::to_string_pretty(&p).unwrap();
         assert!(json.contains(r#""type": "extrude""#));

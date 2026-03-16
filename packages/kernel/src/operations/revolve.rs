@@ -18,6 +18,40 @@ pub struct RevolveParams {
     pub axis_direction: Vec3,
     /// Angle of revolution in radians (2*PI for full revolution)
     pub angle: f64,
+    /// Whether a second direction (reverse) revolution is enabled
+    #[serde(default)]
+    pub direction2_enabled: bool,
+    /// Angle for reverse direction in radians
+    #[serde(default)]
+    pub angle2: f64,
+    /// Whether to revolve symmetrically (Mid Plane: angle/2 in each direction)
+    #[serde(default)]
+    pub symmetric: bool,
+    /// Whether thin feature (shell) is enabled
+    #[serde(default)]
+    pub thin_feature: bool,
+    /// Wall thickness for thin feature
+    #[serde(default)]
+    pub thin_wall_thickness: f64,
+    /// Flip side to cut (for cut revolve only)
+    #[serde(default)]
+    pub flip_side_to_cut: bool,
+}
+
+impl RevolveParams {
+    pub fn full(axis_origin: Pt3, axis_direction: Vec3) -> Self {
+        RevolveParams {
+            axis_origin,
+            axis_direction,
+            angle: 2.0 * std::f64::consts::PI,
+            direction2_enabled: false,
+            angle2: 0.0,
+            symmetric: false,
+            thin_feature: false,
+            thin_wall_thickness: 0.0,
+            flip_side_to_cut: false,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -57,14 +91,12 @@ const DEFAULT_SEGMENTS: usize = 36;
 /// The profile points must not intersect the revolution axis.
 pub fn revolve_profile(
     profile: &ExtrudeProfile,
-    axis_origin: Pt3,
-    axis_direction: Vec3,
-    angle: f64,
+    params: &RevolveParams,
 ) -> KernelResult<BRep> {
-    if angle.abs() < 1e-12 {
+    if params.angle.abs() < 1e-12 {
         return Err(KernelError::InvalidParameter {
             param: "angle".into(),
-            value: angle.to_string(),
+            value: params.angle.to_string(),
         });
     }
 
@@ -76,24 +108,36 @@ pub fn revolve_profile(
         });
     }
 
-    let axis_dir = axis_direction.normalize();
-    let is_full = (angle.abs() - 2.0 * PI).abs() < 1e-6;
+    let axis_origin = params.axis_origin;
+    let axis_dir = params.axis_direction.normalize();
+
+    // Compute start/end angles based on symmetric/direction2 settings
+    let (start_angle, end_angle) = if params.symmetric {
+        (-params.angle / 2.0, params.angle / 2.0)
+    } else if params.direction2_enabled && params.angle2.abs() > 1e-12 {
+        (-params.angle2, params.angle)
+    } else {
+        (0.0, params.angle)
+    };
+    let total_angle = end_angle - start_angle;
+
+    let is_full = (total_angle.abs() - 2.0 * PI).abs() < 1e-6;
 
     // Determine number of angular segments
     let total_segments = if is_full {
         DEFAULT_SEGMENTS
     } else {
-        let frac = angle.abs() / (2.0 * PI);
+        let frac = total_angle.abs() / (2.0 * PI);
         (DEFAULT_SEGMENTS as f64 * frac).ceil().max(2.0) as usize
     };
-    let angle_step = angle / total_segments as f64;
+    let angle_step = total_angle / total_segments as f64;
 
     let mut brep = BRep::new();
 
     // Generate rotated rings of points
     let mut rings: Vec<Vec<Pt3>> = Vec::with_capacity(total_segments + 1);
     for seg in 0..=total_segments {
-        let theta = angle_step * seg as f64;
+        let theta = start_angle + angle_step * seg as f64;
         let ring: Vec<Pt3> = profile
             .points
             .iter()
@@ -142,31 +186,40 @@ pub fn revolve_profile(
 
     // Add cap faces for partial revolutions
     if !is_full {
-        // Start cap: the original profile (reversed winding for outward normal)
+        // Start cap: the first ring (reversed winding for outward normal)
         let start_points: Vec<Pt3> = rings[0].iter().rev().copied().collect();
-        let start_normal = -profile.plane.normal;
+        let start_normal_rotated =
+            rotate_point_around_axis(profile.plane.origin + profile.plane.normal, axis_origin, axis_dir, start_angle)
+                - rotate_point_around_axis(profile.plane.origin, axis_origin, axis_dir, start_angle);
+        let start_normal = -start_normal_rotated.normalize();
+        let start_u =
+            rotate_point_around_axis(profile.plane.origin + profile.plane.u_axis, axis_origin, axis_dir, start_angle)
+                - rotate_point_around_axis(profile.plane.origin, axis_origin, axis_dir, start_angle);
+        let start_v =
+            rotate_point_around_axis(profile.plane.origin + profile.plane.v_axis, axis_origin, axis_dir, start_angle)
+                - rotate_point_around_axis(profile.plane.origin, axis_origin, axis_dir, start_angle);
         let start_plane = Plane {
-            origin: profile.plane.origin,
+            origin: rotate_point_around_axis(profile.plane.origin, axis_origin, axis_dir, start_angle),
             normal: start_normal,
-            u_axis: profile.plane.u_axis,
-            v_axis: profile.plane.v_axis,
+            u_axis: start_u.normalize(),
+            v_axis: start_v.normalize(),
         };
         make_planar_face(&mut brep, &start_points, start_plane)?;
 
-        // End cap: the rotated profile
+        // End cap: the last ring (rotated profile)
         let end_points: Vec<Pt3> = rings[total_segments].clone();
         let end_normal =
-            rotate_point_around_axis(profile.plane.origin + profile.plane.normal, axis_origin, axis_dir, angle)
-                - rotate_point_around_axis(profile.plane.origin, axis_origin, axis_dir, angle);
+            rotate_point_around_axis(profile.plane.origin + profile.plane.normal, axis_origin, axis_dir, end_angle)
+                - rotate_point_around_axis(profile.plane.origin, axis_origin, axis_dir, end_angle);
         let end_normal = end_normal.normalize();
         let end_u =
-            rotate_point_around_axis(profile.plane.origin + profile.plane.u_axis, axis_origin, axis_dir, angle)
-                - rotate_point_around_axis(profile.plane.origin, axis_origin, axis_dir, angle);
+            rotate_point_around_axis(profile.plane.origin + profile.plane.u_axis, axis_origin, axis_dir, end_angle)
+                - rotate_point_around_axis(profile.plane.origin, axis_origin, axis_dir, end_angle);
         let end_v =
-            rotate_point_around_axis(profile.plane.origin + profile.plane.v_axis, axis_origin, axis_dir, angle)
-                - rotate_point_around_axis(profile.plane.origin, axis_origin, axis_dir, angle);
+            rotate_point_around_axis(profile.plane.origin + profile.plane.v_axis, axis_origin, axis_dir, end_angle)
+                - rotate_point_around_axis(profile.plane.origin, axis_origin, axis_dir, end_angle);
         let end_plane = Plane {
-            origin: rotate_point_around_axis(profile.plane.origin, axis_origin, axis_dir, angle),
+            origin: rotate_point_around_axis(profile.plane.origin, axis_origin, axis_dir, end_angle),
             normal: end_normal,
             u_axis: end_u.normalize(),
             v_axis: end_v.normalize(),
@@ -184,7 +237,7 @@ pub fn revolve_profile(
 }
 
 /// Rotate a point around an axis using Rodrigues' rotation formula.
-fn rotate_point_around_axis(point: Pt3, axis_origin: Pt3, axis_dir: Vec3, angle: f64) -> Pt3 {
+pub(crate) fn rotate_point_around_axis(point: Pt3, axis_origin: Pt3, axis_dir: Vec3, angle: f64) -> Pt3 {
     let v = point - axis_origin;
     let cos_a = angle.cos();
     let sin_a = angle.sin();
@@ -223,13 +276,8 @@ mod tests {
     #[test]
     fn test_revolve_full_creates_solid() {
         let profile = square_profile();
-        let brep = revolve_profile(
-            &profile,
-            Pt3::origin(),
-            Vec3::new(0.0, 0.0, 1.0), // Revolve around Z axis
-            2.0 * PI,
-        )
-        .unwrap();
+        let params = RevolveParams::full(Pt3::origin(), Vec3::new(0.0, 0.0, 1.0));
+        let brep = revolve_profile(&profile, &params).unwrap();
 
         // Full revolution of 4-edge profile with 36 segments:
         // 36 segments × 4 edges = 144 side faces, no caps
@@ -246,13 +294,9 @@ mod tests {
     #[test]
     fn test_revolve_half_creates_faces() {
         let profile = square_profile();
-        let brep = revolve_profile(
-            &profile,
-            Pt3::origin(),
-            Vec3::new(0.0, 0.0, 1.0),
-            PI, // 180 degrees
-        )
-        .unwrap();
+        let mut params = RevolveParams::full(Pt3::origin(), Vec3::new(0.0, 0.0, 1.0));
+        params.angle = PI; // 180 degrees
+        let brep = revolve_profile(&profile, &params).unwrap();
 
         // 18 segments × 4 edges = 72 side faces + 2 cap faces = 74
         assert_eq!(brep.faces.len(), 74);
@@ -262,13 +306,9 @@ mod tests {
     #[test]
     fn test_revolve_quarter() {
         let profile = square_profile();
-        let brep = revolve_profile(
-            &profile,
-            Pt3::origin(),
-            Vec3::new(0.0, 0.0, 1.0),
-            PI / 2.0, // 90 degrees
-        )
-        .unwrap();
+        let mut params = RevolveParams::full(Pt3::origin(), Vec3::new(0.0, 0.0, 1.0));
+        params.angle = PI / 2.0; // 90 degrees
+        let brep = revolve_profile(&profile, &params).unwrap();
 
         // 9 segments × 4 edges = 36 side faces + 2 cap faces = 38
         assert_eq!(brep.faces.len(), 38);
@@ -277,25 +317,17 @@ mod tests {
     #[test]
     fn test_revolve_zero_angle_rejected() {
         let profile = square_profile();
-        let result = revolve_profile(
-            &profile,
-            Pt3::origin(),
-            Vec3::new(0.0, 0.0, 1.0),
-            0.0,
-        );
+        let mut params = RevolveParams::full(Pt3::origin(), Vec3::new(0.0, 0.0, 1.0));
+        params.angle = 0.0;
+        let result = revolve_profile(&profile, &params);
         assert!(result.is_err());
     }
 
     #[test]
     fn test_revolve_tessellation_valid() {
         let profile = square_profile();
-        let brep = revolve_profile(
-            &profile,
-            Pt3::origin(),
-            Vec3::new(0.0, 0.0, 1.0),
-            2.0 * PI,
-        )
-        .unwrap();
+        let params = RevolveParams::full(Pt3::origin(), Vec3::new(0.0, 0.0, 1.0));
+        let brep = revolve_profile(&profile, &params).unwrap();
 
         let mesh = tessellate_brep(&brep, &TessellationParams::default()).unwrap();
         mesh.validate().unwrap();
@@ -313,5 +345,40 @@ mod tests {
                 len
             );
         }
+    }
+
+    #[test]
+    fn test_revolve_symmetric() {
+        let profile = square_profile();
+        let mut params = RevolveParams::full(Pt3::origin(), Vec3::new(0.0, 0.0, 1.0));
+        params.angle = PI; // 180 degrees total
+        params.symmetric = true; // -90 to +90
+        let brep = revolve_profile(&profile, &params).unwrap();
+        assert!(matches!(brep.body, Body::Solid(_)));
+        // Partial revolution: should have side faces + 2 caps
+        assert!(brep.faces.len() > 2);
+    }
+
+    #[test]
+    fn test_revolve_direction2() {
+        let profile = square_profile();
+        let mut params = RevolveParams::full(Pt3::origin(), Vec3::new(0.0, 0.0, 1.0));
+        params.angle = PI / 2.0; // 90 degrees forward
+        params.direction2_enabled = true;
+        params.angle2 = PI / 2.0; // 90 degrees reverse
+        let brep = revolve_profile(&profile, &params).unwrap();
+        assert!(matches!(brep.body, Body::Solid(_)));
+    }
+
+    #[test]
+    fn test_revolve_symmetric_ignores_direction2() {
+        let profile = square_profile();
+        let mut params = RevolveParams::full(Pt3::origin(), Vec3::new(0.0, 0.0, 1.0));
+        params.angle = PI;
+        params.symmetric = true;
+        params.direction2_enabled = true; // should be ignored
+        params.angle2 = PI; // should be ignored
+        let brep = revolve_profile(&profile, &params).unwrap();
+        assert!(matches!(brep.body, Body::Solid(_)));
     }
 }

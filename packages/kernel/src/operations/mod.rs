@@ -1,9 +1,11 @@
 // Client operations (always available)
 pub mod traits;
 pub mod extrude;
+pub mod cut_extrude;
 pub mod revolve;
 pub mod fillet;
 pub mod chamfer;
+pub mod pattern;
 
 // Server-only operations (computationally expensive)
 #[cfg(feature = "server")]
@@ -16,7 +18,5 @@ pub mod loft;
 pub mod shell;
 #[cfg(feature = "server")]
 pub mod draft;
-#[cfg(feature = "server")]
-pub mod pattern;
 
 pub use traits::Operation;

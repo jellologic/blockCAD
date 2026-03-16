@@ -11,7 +11,9 @@ pub enum FeatureKind {
 
     // Client operations
     Extrude,
+    CutExtrude,
     Revolve,
+    CutRevolve,
     Fillet,
     Chamfer,
 
@@ -33,7 +35,9 @@ impl FeatureKind {
         match self {
             FeatureKind::Sketch => "Sketch",
             FeatureKind::Extrude => "Extrude",
+            FeatureKind::CutExtrude => "Cut Extrude",
             FeatureKind::Revolve => "Revolve",
+            FeatureKind::CutRevolve => "Cut Revolve",
             FeatureKind::Fillet => "Fillet",
             FeatureKind::Chamfer => "Chamfer",
             FeatureKind::BooleanUnion => "Boolean Union",
@@ -60,9 +64,6 @@ impl FeatureKind {
                 | FeatureKind::Loft
                 | FeatureKind::Shell
                 | FeatureKind::Draft
-                | FeatureKind::LinearPattern
-                | FeatureKind::CircularPattern
-                | FeatureKind::Mirror
         )
     }
 }
@@ -86,9 +87,14 @@ mod tests {
     #[test]
     fn client_ops_dont_require_server() {
         assert!(!FeatureKind::Extrude.requires_server());
+        assert!(!FeatureKind::CutExtrude.requires_server());
         assert!(!FeatureKind::Revolve.requires_server());
+        assert!(!FeatureKind::CutRevolve.requires_server());
         assert!(!FeatureKind::Fillet.requires_server());
         assert!(!FeatureKind::Chamfer.requires_server());
+        assert!(!FeatureKind::LinearPattern.requires_server());
+        assert!(!FeatureKind::CircularPattern.requires_server());
+        assert!(!FeatureKind::Mirror.requires_server());
     }
 
     #[test]
