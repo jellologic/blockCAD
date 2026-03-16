@@ -28,6 +28,9 @@ pub enum FeatureKind {
     LinearPattern,
     CircularPattern,
     Mirror,
+
+    // Reference geometry
+    DatumPlane,
 }
 
 impl FeatureKind {
@@ -50,6 +53,7 @@ impl FeatureKind {
             FeatureKind::LinearPattern => "Linear Pattern",
             FeatureKind::CircularPattern => "Circular Pattern",
             FeatureKind::Mirror => "Mirror",
+            FeatureKind::DatumPlane => "Datum Plane",
         }
     }
 

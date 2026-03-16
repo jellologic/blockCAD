@@ -24,6 +24,8 @@ pub struct FeatureTree {
     pub sketches: HashMap<usize, Sketch>,
     /// Intermediate results: solved profiles from sketch features, keyed by feature index.
     pub sketch_profiles: HashMap<usize, ExtrudeProfile>,
+    /// Computed datum planes, keyed by feature index.
+    pub datum_planes: HashMap<usize, crate::geometry::surface::plane::Plane>,
 }
 
 impl FeatureTree {
@@ -34,6 +36,7 @@ impl FeatureTree {
             cache: Vec::new(),
             sketches: HashMap::new(),
             sketch_profiles: HashMap::new(),
+            datum_planes: HashMap::new(),
         }
     }
 

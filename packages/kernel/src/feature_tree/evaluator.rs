@@ -496,6 +496,32 @@ pub fn evaluate(tree: &mut FeatureTree) -> KernelResult<BRep> {
                 tree.features_mut()[i].state = FeatureState::Evaluated;
             }
 
+            FeatureKind::DatumPlane => {
+                let params = match &tree.features()[i].params {
+                    FeatureParams::DatumPlane(p) => p.clone(),
+                    _ => {
+                        tree.features_mut()[i].state = FeatureState::Failed;
+                        return Err(KernelError::Operation {
+                            op: "evaluate".into(),
+                            detail: "DatumPlane feature has wrong params type".into(),
+                        });
+                    }
+                };
+                // Resolve base plane: check datum_planes registry or use XY default
+                let base_plane = params.base_plane_index
+                    .and_then(|idx| tree.datum_planes.get(&idx))
+                    .cloned()
+                    .unwrap_or_else(|| crate::geometry::surface::plane::Plane::xy(0.0));
+
+                let brep_ref = if matches!(current_brep.body, Body::Empty) { None } else { Some(&current_brep) };
+                let plane = crate::operations::datum_plane::compute_datum_plane(
+                    &params.kind, Some(&base_plane), brep_ref,
+                )?;
+                tree.datum_planes.insert(i, plane);
+                // Datum planes don't produce geometry — current_brep unchanged
+                tree.features_mut()[i].state = FeatureState::Evaluated;
+            }
+
             other => {
                 tree.features_mut()[i].state = FeatureState::Failed;
                 return Err(KernelError::Operation {

@@ -13,5 +13,6 @@ pub mod boolean;
 pub mod sweep;
 pub mod loft;
 pub mod draft;
+pub mod datum_plane;
 
 pub use traits::Operation;
