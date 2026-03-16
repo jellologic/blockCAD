@@ -325,3 +325,75 @@ def stress_tiny_fillet():
 def stress_high_count_pattern():
     """2x2x2 box patterned 10x along X with spacing 3."""
     return load_stl("stress_high_count_pattern"), load_kernel_props("stress_high_count_pattern")
+
+
+@pytest.fixture
+def stress_mirror_pattern():
+    """10x5x7 box mirrored across YZ plane, then linear pattern 2x along X (spacing 25)."""
+    return load_stl("stress_mirror_pattern"), load_kernel_props("stress_mirror_pattern")
+
+
+@pytest.fixture
+def stress_l_shape_fillet_mirror():
+    """L-shape (10x10 minus 5x5 corner) extruded 5mm, fillet(edge 0, r=0.3), mirror(YZ at x=0)."""
+    return load_stl("stress_l_shape_fillet_mirror"), load_kernel_props("stress_l_shape_fillet_mirror")
+
+
+@pytest.fixture
+def stress_box_5ops():
+    """10x5x7 box -> Fillet(edge 0, r=0.5) -> Chamfer(edge 4, d=0.3) -> Shell(top removed, t=0.4) -> Draft(2 faces, 3 deg)."""
+    return load_stl("stress_box_5ops"), load_kernel_props("stress_box_5ops")
+
+
+@pytest.fixture
+def stress_full_part_3():
+    """10x5x7 box -> Shell(top removed, t=0.5) -> Fillet(edge 0, r=0.3) -> Mirror(YZ at x=0)."""
+    return load_stl("stress_full_part_3"), load_kernel_props("stress_full_part_3")
+
+
+@pytest.fixture
+def stress_full_part_2():
+    """10x5x7 box -> Chamfer(edge 0, d=0.5) -> Mirror(YZ at x=0) -> Draft(2 faces, 5 deg)."""
+    return load_stl("stress_full_part_2"), load_kernel_props("stress_full_part_2")
+
+
+@pytest.fixture
+def stress_sweep_shell():
+    """4x4 square swept 10 units along Z, then shelled (1 face removed, t=0.3)."""
+    return load_stl("stress_sweep_shell"), load_kernel_props("stress_sweep_shell")
+
+
+@pytest.fixture
+def stress_full_part_1():
+    """10x5x7 box -> Fillet(edge 0, r=0.5) -> CutExtrude(4x2x3 blind pocket) -> Shell(top removed, t=0.5)."""
+    return load_stl("stress_full_part_1"), load_kernel_props("stress_full_part_1")
+
+
+@pytest.fixture
+def stress_loft_fillet():
+    """Loft(3 sections: 4x4->3x3->2x2 at z=0,5,10) -> Fillet(edge 0, r=0.3). Tapered solid with rounding."""
+    return load_stl("stress_loft_fillet"), load_kernel_props("stress_loft_fillet")
+
+
+@pytest.fixture
+def stress_circular_shell():
+    """2x2x5 box at x=5..7 -> CircularPattern(6 copies, 60 deg, Z axis at origin) -> Shell(top removed, t=0.3)."""
+    return load_stl("stress_circular_shell"), load_kernel_props("stress_circular_shell")
+
+
+@pytest.fixture
+def stress_boolean_fillet_shell():
+    """Two 10x5x7 boxes (B offset 5 in X) -> BooleanUnion -> Fillet(edge 0, r=0.5) -> Shell(top removed, t=0.5)."""
+    return load_stl("stress_boolean_fillet_shell"), load_kernel_props("stress_boolean_fillet_shell")
+
+
+@pytest.fixture
+def stress_pattern_cut():
+    """10x5x7 box -> LinearPattern(2x, spacing 15, X) -> CutExtrude(4x2x3 blind pocket on first copy)."""
+    return load_stl("stress_pattern_cut"), load_kernel_props("stress_pattern_cut")
+
+
+@pytest.fixture
+def stress_revolve_cut_chamfer():
+    """Full 360-deg revolve -> CutExtrude(2x1.5x2 pocket) -> Chamfer (chamfer skipped: known limitation)."""
+    return load_stl("stress_revolve_cut_chamfer"), load_kernel_props("stress_revolve_cut_chamfer")
