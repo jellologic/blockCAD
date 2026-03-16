@@ -1,0 +1,10 @@
+node_modules
+.git
+target
+packages/kernel/target
+packages/kernel/pkg-server
+apps/desktop
+apps/web/test-results
+apps/web/e2e
+**/*.spec.ts
+**/*.test.ts

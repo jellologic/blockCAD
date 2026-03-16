@@ -1,0 +1,9 @@
+node_modules
+.git
+target
+packages/kernel/target
+apps/desktop
+apps/web/test-results
+apps/web/e2e
+*.spec.ts
+*.test.ts
