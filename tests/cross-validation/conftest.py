@@ -397,3 +397,24 @@ def stress_pattern_cut():
 def stress_revolve_cut_chamfer():
     """Full 360-deg revolve -> CutExtrude(2x1.5x2 pocket) -> Chamfer (chamfer skipped: known limitation)."""
     return load_stl("stress_revolve_cut_chamfer"), load_kernel_props("stress_revolve_cut_chamfer")
+
+
+# ─── New operation fixtures ────────────────────────────────────────
+
+
+@pytest.fixture
+def variable_fillet_box():
+    """10x10x10 box with variable fillet (r=1 to r=2) on edge 0."""
+    return load_stl("variable_fillet_box"), load_kernel_props("variable_fillet_box")
+
+
+@pytest.fixture
+def scale_2x_box():
+    """5x5x5 box scaled 2x uniformly. Expected volume ~1000."""
+    return load_stl("scale_2x_box"), load_kernel_props("scale_2x_box")
+
+
+@pytest.fixture
+def ten_op_workflow():
+    """10x5x7 box -> Fillet -> Chamfer -> Shell -> Mirror -> Scale(1.5x)."""
+    return load_stl("10_op_workflow"), load_kernel_props("10_op_workflow")

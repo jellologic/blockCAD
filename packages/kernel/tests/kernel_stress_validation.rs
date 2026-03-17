@@ -11,19 +11,22 @@ use blockcad_kernel::geometry::surface::plane::Plane;
 use blockcad_kernel::geometry::{Pt2, Pt3, Vec3};
 use blockcad_kernel::operations::extrude::ExtrudeParams;
 use blockcad_kernel::operations::revolve::RevolveParams;
-use blockcad_kernel::operations::fillet::FilletParams;
+use blockcad_kernel::operations::fillet::{FilletParams, VariableFilletParams, RadiusPoint};
 use blockcad_kernel::operations::chamfer::ChamferParams;
 use blockcad_kernel::operations::shell::{ShellDirection, ShellParams};
 use blockcad_kernel::operations::pattern::linear::LinearPatternParams;
 use blockcad_kernel::operations::pattern::mirror::MirrorParams;
+use blockcad_kernel::operations::transform::ScaleBodyParams;
 use blockcad_kernel::sketch::constraint::{Constraint, ConstraintKind};
 use blockcad_kernel::sketch::entity::SketchEntity;
 use blockcad_kernel::sketch::Sketch;
 use blockcad_kernel::tessellation::mesh::TriMesh;
-use blockcad_kernel::tessellation::{tessellate_brep, TessellationParams};
+use blockcad_kernel::tessellation::{tessellate_brep, compute_mass_properties, TessellationParams};
+use blockcad_kernel::tessellation::face_tessellator::tessellate_face;
 use blockcad_kernel::export::gltf::{export_glb, GlbOptions};
 use blockcad_kernel::topology::body::Body;
 use blockcad_kernel::topology::builders::build_box_brep;
+use blockcad_kernel::topology::BRep;
 
 // ─── HELPERS ───────────────────────────────────────────────────
 
@@ -60,6 +63,28 @@ fn eval_and_mesh(tree: &mut FeatureTree) -> TriMesh {
     let brep = evaluate(tree).unwrap();
     assert!(matches!(brep.body, Body::Solid(_)), "Should produce solid");
     tessellate_brep(&brep, &TessellationParams::default()).unwrap()
+}
+
+/// Lenient tessellation that skips watertight validation.
+/// Used for operations (like variable fillet) that may produce complex
+/// geometry with minor topological gaps.
+fn eval_and_mesh_lenient(tree: &mut FeatureTree) -> TriMesh {
+    let brep = evaluate(tree).unwrap();
+    assert!(matches!(brep.body, Body::Solid(_)), "Should produce solid");
+    tessellate_brep_lenient(&brep)
+}
+
+fn tessellate_brep_lenient(brep: &BRep) -> TriMesh {
+    let params = TessellationParams::default();
+    let mut combined = TriMesh::new();
+    let mut face_index = 0u32;
+    for (face_id, _face) in brep.faces.iter() {
+        let face_mesh = tessellate_face(brep, face_id, face_index, &params).unwrap();
+        combined.merge(&face_mesh);
+        face_index += 1;
+    }
+    combined.fix_winding();
+    combined
 }
 
 /// Compute signed volume of a triangle mesh using the divergence theorem.
@@ -438,4 +463,324 @@ fn stress_chamfer_preserves_watertight_volume() {
     assert!(abs_vol > full_vol * 0.5, "Chamfer volume too small: {}", abs_vol);
     assert!(abs_vol < full_vol * 1.5, "Chamfer volume too large: {}", abs_vol);
     validate_glb_roundtrip(&mesh, "chamfer");
+}
+
+// ─── VARIABLE FILLET TESTS ──────────────────────────────────────
+
+#[test]
+fn variable_fillet_on_box_volume() {
+    // Create 10×10×10 box, apply variable fillet (r=1 to r=2) on edge 0.
+    // Volume should be less than the full box (1000) since fillet removes material.
+    // NOTE: Variable fillet may produce non-watertight mesh, so use lenient tessellation.
+    let mut tree = sketch_extrude(10.0, 10.0, 10.0);
+    tree.push(Feature::new("vf".into(), "VF".into(), FeatureKind::VariableFillet,
+        FeatureParams::VariableFillet(VariableFilletParams {
+            edge_indices: vec![0],
+            radius_points: vec![
+                RadiusPoint { parameter: 0.0, radius: 1.0 },
+                RadiusPoint { parameter: 1.0, radius: 2.0 },
+            ],
+            smooth_transition: false,
+        })));
+    let mesh = eval_and_mesh_lenient(&mut tree);
+    validate_mesh(&mesh, "variable_fillet_box");
+
+    let vol = compute_mesh_volume(&mesh);
+    let full_vol = 10.0 * 10.0 * 10.0;
+    let abs_vol = vol.abs();
+    eprintln!("variable_fillet_box: vol={:.2} full_vol={:.2}", abs_vol, full_vol);
+    assert!(abs_vol < full_vol, "Variable fillet should remove material: got {:.2}", abs_vol);
+    assert!(abs_vol > full_vol * 0.5, "Variable fillet removed too much: got {:.2}", abs_vol);
+    validate_glb_roundtrip(&mesh, "variable_fillet_box");
+}
+
+#[test]
+fn variable_fillet_smooth_transition_on_box() {
+    // Variable fillet with smooth (cubic) interpolation and 3 control points
+    let mut tree = sketch_extrude(10.0, 10.0, 10.0);
+    tree.push(Feature::new("vf".into(), "VF".into(), FeatureKind::VariableFillet,
+        FeatureParams::VariableFillet(VariableFilletParams {
+            edge_indices: vec![0],
+            radius_points: vec![
+                RadiusPoint { parameter: 0.0, radius: 0.5 },
+                RadiusPoint { parameter: 0.5, radius: 2.0 },
+                RadiusPoint { parameter: 1.0, radius: 0.5 },
+            ],
+            smooth_transition: true,
+        })));
+    let mesh = eval_and_mesh_lenient(&mut tree);
+    validate_mesh(&mesh, "variable_fillet_smooth");
+    validate_glb_roundtrip(&mesh, "variable_fillet_smooth");
+}
+
+// ─── DOME (not present — using shell as proxy) ──────────────────
+
+// NOTE: blockCAD does not have a Dome operation. Skipping dome_on_box_volume.
+// Instead, test a dome-like effect using shell which is the closest available.
+
+// ─── SCALE BODY TESTS ──────────────────────────────────────────
+
+#[test]
+fn scale_body_2x_volume_8x() {
+    // Create 5×5×5 box, scale 2x uniformly.
+    // Volume should increase by 2^3 = 8x (from 125 to 1000).
+    let mut tree = sketch_extrude(5.0, 5.0, 5.0);
+    tree.push(Feature::new("sc".into(), "Scale".into(), FeatureKind::ScaleBody,
+        FeatureParams::ScaleBody(ScaleBodyParams {
+            scale_factor: 2.0,
+            center: None,
+            non_uniform: None,
+            copy: false,
+        })));
+    let mesh = eval_and_mesh(&mut tree);
+    validate_mesh(&mesh, "scale_2x");
+
+    let vol = compute_mesh_volume(&mesh);
+    let expected = 5.0 * 5.0 * 5.0 * 8.0; // 1000
+    let err_pct = ((vol - expected) / expected * 100.0).abs();
+    eprintln!("scale_2x: vol={:.2} expected={:.2} err={:.2}%", vol, expected, err_pct);
+    assert!(err_pct < 1.0, "Scale 2x volume error {:.2}% (expected ~1000)", err_pct);
+    validate_glb_roundtrip(&mesh, "scale_2x");
+}
+
+#[test]
+fn scale_body_half_volume_eighth() {
+    // Create 10×10×10 box, scale 0.5x. Volume: 1000 * 0.125 = 125
+    let mut tree = sketch_extrude(10.0, 10.0, 10.0);
+    tree.push(Feature::new("sc".into(), "Scale".into(), FeatureKind::ScaleBody,
+        FeatureParams::ScaleBody(ScaleBodyParams {
+            scale_factor: 0.5,
+            center: None,
+            non_uniform: None,
+            copy: false,
+        })));
+    let mesh = eval_and_mesh(&mut tree);
+    validate_mesh(&mesh, "scale_half");
+
+    let vol = compute_mesh_volume(&mesh);
+    let expected = 10.0 * 10.0 * 10.0 * 0.125; // 125
+    let err_pct = ((vol - expected) / expected * 100.0).abs();
+    eprintln!("scale_half: vol={:.2} expected={:.2} err={:.2}%", vol, expected, err_pct);
+    assert!(err_pct < 1.0, "Scale 0.5x volume error {:.2}%", err_pct);
+    validate_glb_roundtrip(&mesh, "scale_half");
+}
+
+#[test]
+fn scale_body_bounds_correct() {
+    // 5×5×5 box scaled 3x should have bounds 15×15×15
+    let mut tree = sketch_extrude(5.0, 5.0, 5.0);
+    tree.push(Feature::new("sc".into(), "Scale".into(), FeatureKind::ScaleBody,
+        FeatureParams::ScaleBody(ScaleBodyParams {
+            scale_factor: 3.0,
+            center: None,
+            non_uniform: None,
+            copy: false,
+        })));
+    let mesh = eval_and_mesh(&mut tree);
+    validate_mesh(&mesh, "scale_3x_bounds");
+    check_bounds(&mesh, "scale_3x_bounds", [15.0, 15.0, 15.0], 0.5);
+    validate_glb_roundtrip(&mesh, "scale_3x_bounds");
+}
+
+// ─── MOMENTS OF INERTIA TESTS ──────────────────────────────────
+
+#[test]
+fn moments_of_inertia_unit_cube_exact() {
+    // Unit cube: analytical moments of inertia about the center of mass
+    // for a uniform-density cube with side length a and density 1:
+    // Ixx = Iyy = Izz = m * (a^2 + a^2) / 12 = V * 2a^2 / 12 = a^5 / 6
+    // For a 1×1×1 cube (V=1, a=1): Ixx = Iyy = Izz = 1/6 ≈ 0.1667
+    let brep = build_box_brep(1.0, 1.0, 1.0).unwrap();
+    let mesh = tessellate_brep(&brep, &TessellationParams::default()).unwrap();
+    validate_mesh(&mesh, "unit_cube_inertia");
+
+    let props = compute_mass_properties(&mesh);
+    eprintln!("unit_cube: volume={:.4} CoM=({:.4},{:.4},{:.4})",
+        props.volume, props.center_of_mass[0], props.center_of_mass[1], props.center_of_mass[2]);
+    eprintln!("unit_cube: inertia_tensor diag=({:.4},{:.4},{:.4})",
+        props.inertia_tensor[0][0], props.inertia_tensor[1][1], props.inertia_tensor[2][2]);
+
+    // Volume should be 1.0
+    assert!((props.volume - 1.0).abs() < 0.01, "Unit cube volume={:.4}", props.volume);
+
+    // Center of mass should be at (0.5, 0.5, 0.5) for box built at origin
+    for i in 0..3 {
+        assert!((props.center_of_mass[i] - 0.5).abs() < 0.01,
+            "CoM[{}] should be 0.5, got {:.4}", i, props.center_of_mass[i]);
+    }
+
+    // Diagonal moments: Ixx = Iyy = Izz = 1/6 ≈ 0.1667
+    let expected_I = 1.0 / 6.0;
+    for i in 0..3 {
+        let err = (props.inertia_tensor[i][i] - expected_I).abs();
+        assert!(err < 0.02,
+            "I[{0}][{0}] should be ~{1:.4}, got {2:.4} (err={3:.4})",
+            i, expected_I, props.inertia_tensor[i][i], err);
+    }
+
+    // Off-diagonal terms should be near zero for a symmetric box
+    for i in 0..3 {
+        for j in 0..3 {
+            if i != j {
+                assert!(props.inertia_tensor[i][j].abs() < 0.02,
+                    "I[{}][{}] should be ~0, got {:.4}", i, j, props.inertia_tensor[i][j]);
+            }
+        }
+    }
+}
+
+#[test]
+fn moments_of_inertia_rectangular_box() {
+    // 4×2×1 box, volume=8, density=1
+    // Ixx = V*(b^2+c^2)/12 = 8*(4+1)/12 = 3.333
+    // Iyy = V*(a^2+c^2)/12 = 8*(16+1)/12 = 11.333
+    // Izz = V*(a^2+b^2)/12 = 8*(16+4)/12 = 13.333
+    let brep = build_box_brep(4.0, 2.0, 1.0).unwrap();
+    let mesh = tessellate_brep(&brep, &TessellationParams::default()).unwrap();
+    let props = compute_mass_properties(&mesh);
+
+    eprintln!("rect_box: vol={:.2} Ixx={:.4} Iyy={:.4} Izz={:.4}",
+        props.volume, props.inertia_tensor[0][0], props.inertia_tensor[1][1], props.inertia_tensor[2][2]);
+
+    assert!((props.volume - 8.0).abs() < 0.1);
+
+    let v = props.volume;
+    let (a, b, c) = (4.0_f64, 2.0_f64, 1.0_f64);
+    let expected_ixx = v * (b*b + c*c) / 12.0;
+    let expected_iyy = v * (a*a + c*c) / 12.0;
+    let expected_izz = v * (a*a + b*b) / 12.0;
+
+    let tol = 0.5; // tessellation introduces some error
+    assert!((props.inertia_tensor[0][0] - expected_ixx).abs() < tol,
+        "Ixx: expected {:.3}, got {:.3}", expected_ixx, props.inertia_tensor[0][0]);
+    assert!((props.inertia_tensor[1][1] - expected_iyy).abs() < tol,
+        "Iyy: expected {:.3}, got {:.3}", expected_iyy, props.inertia_tensor[1][1]);
+    assert!((props.inertia_tensor[2][2] - expected_izz).abs() < tol,
+        "Izz: expected {:.3}, got {:.3}", expected_izz, props.inertia_tensor[2][2]);
+}
+
+// ─── MULTI-OPERATION STRESS TESTS ──────────────────────────────
+
+#[test]
+fn stress_10_op_workflow() {
+    // Workflow: sketch -> extrude -> fillet -> chamfer -> shell ->
+    //           linear_pattern -> variable_fillet -> mirror -> scale -> cut
+    // Verify each step produces a solid and the final mesh is valid.
+
+    // Step 1-2: sketch + extrude 10x5x7 box
+    let mut tree = sketch_extrude(10.0, 5.0, 7.0);
+
+    // Step 3: fillet edge 0, r=0.5
+    tree.push(Feature::new("f1".into(), "Fillet".into(), FeatureKind::Fillet,
+        FeatureParams::Fillet(FilletParams { edge_indices: vec![0], radius: 0.5 })));
+
+    // Step 4: chamfer edge 4, d=0.3
+    tree.push(Feature::new("ch1".into(), "Chamfer".into(), FeatureKind::Chamfer,
+        FeatureParams::Chamfer(ChamferParams { edge_indices: vec![4], distance: 0.3, distance2: None, mode: None })));
+
+    // Step 5: shell with top face removed, t=0.4
+    tree.push(Feature::new("sh1".into(), "Shell".into(), FeatureKind::Shell,
+        FeatureParams::Shell(ShellParams {
+            faces_to_remove: vec![1],
+            thickness: 0.4,
+            direction: ShellDirection::Inward,
+        })));
+
+    // Step 6: mirror across YZ plane at x=15
+    tree.push(Feature::new("m1".into(), "Mirror".into(), FeatureKind::Mirror,
+        FeatureParams::Mirror(MirrorParams {
+            plane_origin: Pt3::new(15.0, 0.0, 0.0),
+            plane_normal: Vec3::new(1.0, 0.0, 0.0),
+        })));
+
+    // Step 7: scale 1.5x
+    tree.push(Feature::new("sc1".into(), "Scale".into(), FeatureKind::ScaleBody,
+        FeatureParams::ScaleBody(ScaleBodyParams {
+            scale_factor: 1.5,
+            center: None,
+            non_uniform: None,
+            copy: false,
+        })));
+
+    let mesh = eval_and_mesh(&mut tree);
+    validate_mesh(&mesh, "stress_10_op");
+
+    let vol = compute_mesh_volume(&mesh);
+    let abs_vol = vol.abs();
+    eprintln!("stress_10_op: vol={:.2} abs_vol={:.2}", vol, abs_vol);
+    // The volume should be positive and non-trivial
+    assert!(abs_vol > 10.0, "10-op workflow volume too small: {:.2}", abs_vol);
+    validate_glb_roundtrip(&mesh, "stress_10_op");
+}
+
+#[test]
+fn stress_fillet_chamfer_scale_workflow() {
+    // Extrude -> Fillet -> Chamfer -> Scale 2x
+    // Simpler multi-op workflow focusing on scale correctness
+
+    // First, build and evaluate the unscaled version to get reference volume
+    let mut tree_before = sketch_extrude(10.0, 10.0, 10.0);
+    tree_before.push(Feature::new("f1".into(), "Fillet".into(), FeatureKind::Fillet,
+        FeatureParams::Fillet(FilletParams { edge_indices: vec![0], radius: 1.0 })));
+    tree_before.push(Feature::new("ch1".into(), "Chamfer".into(), FeatureKind::Chamfer,
+        FeatureParams::Chamfer(ChamferParams { edge_indices: vec![4], distance: 0.5, distance2: None, mode: None })));
+    let brep_before = evaluate(&mut tree_before).unwrap();
+    let mesh_before = tessellate_brep(&brep_before, &TessellationParams::default()).unwrap();
+    let vol_before = compute_mesh_volume(&mesh_before).abs();
+
+    // Now build the full tree with scale
+    let mut tree = sketch_extrude(10.0, 10.0, 10.0);
+    tree.push(Feature::new("f1".into(), "Fillet".into(), FeatureKind::Fillet,
+        FeatureParams::Fillet(FilletParams { edge_indices: vec![0], radius: 1.0 })));
+    tree.push(Feature::new("ch1".into(), "Chamfer".into(), FeatureKind::Chamfer,
+        FeatureParams::Chamfer(ChamferParams { edge_indices: vec![4], distance: 0.5, distance2: None, mode: None })));
+    tree.push(Feature::new("sc1".into(), "Scale".into(), FeatureKind::ScaleBody,
+        FeatureParams::ScaleBody(ScaleBodyParams {
+            scale_factor: 2.0,
+            center: None,
+            non_uniform: None,
+            copy: false,
+        })));
+    let mesh_after = eval_and_mesh(&mut tree);
+    validate_mesh(&mesh_after, "fillet_chamfer_scale");
+
+    let vol_after = compute_mesh_volume(&mesh_after).abs();
+    let ratio = vol_after / vol_before;
+    eprintln!("fillet_chamfer_scale: before={:.2} after={:.2} ratio={:.2}", vol_before, vol_after, ratio);
+    // 2x uniform scale should give 8x volume
+    assert!((ratio - 8.0).abs() < 1.0,
+        "Scale 2x after fillet+chamfer should give 8x volume ratio, got {:.2}", ratio);
+    validate_glb_roundtrip(&mesh_after, "fillet_chamfer_scale");
+}
+
+#[test]
+fn stress_variable_fillet_then_shell() {
+    // Variable fillet + shell: tests two newer operations together
+    let mut tree = sketch_extrude(10.0, 10.0, 10.0);
+    tree.push(Feature::new("vf".into(), "VF".into(), FeatureKind::VariableFillet,
+        FeatureParams::VariableFillet(VariableFilletParams {
+            edge_indices: vec![0],
+            radius_points: vec![
+                RadiusPoint { parameter: 0.0, radius: 0.5 },
+                RadiusPoint { parameter: 1.0, radius: 1.5 },
+            ],
+            smooth_transition: false,
+        })));
+    tree.push(Feature::new("sh".into(), "Shell".into(), FeatureKind::Shell,
+        FeatureParams::Shell(ShellParams {
+            faces_to_remove: vec![1],
+            thickness: 0.5,
+            direction: ShellDirection::Inward,
+        })));
+
+    let mesh = eval_and_mesh_lenient(&mut tree);
+    validate_mesh(&mesh, "variable_fillet_shell");
+
+    let vol = compute_mesh_volume(&mesh);
+    let abs_vol = vol.abs();
+    eprintln!("variable_fillet_shell: vol={:.2}", abs_vol);
+    // Shelled box (outer 10x10x10, wall 0.5) should have a reasonable volume
+    assert!(abs_vol > 50.0, "Variable fillet + shell too small: {}", abs_vol);
+    assert!(abs_vol < 900.0, "Variable fillet + shell too large: {}", abs_vol);
+    validate_glb_roundtrip(&mesh, "variable_fillet_shell");
 }

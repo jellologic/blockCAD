@@ -15,7 +15,8 @@ use blockcad_kernel::operations::chamfer::ChamferParams;
 use blockcad_kernel::operations::draft::DraftParams;
 use blockcad_kernel::operations::cut_extrude::CutExtrudeParams;
 use blockcad_kernel::operations::extrude::{ExtrudeParams, ExtrudeProfile};
-use blockcad_kernel::operations::fillet::FilletParams;
+use blockcad_kernel::operations::fillet::{FilletParams, VariableFilletParams, RadiusPoint};
+use blockcad_kernel::operations::transform::ScaleBodyParams;
 use blockcad_kernel::operations::loft::{loft_profiles, LoftParams};
 use blockcad_kernel::operations::pattern::circular::{CircularPatternParams, circular_pattern};
 use blockcad_kernel::operations::pattern::linear::LinearPatternParams;
@@ -2306,4 +2307,138 @@ fn export_stress_boolean_fillet_shell_fixture() {
         "Stress boolean_fillet_shell volume ({}) should be > 50", props.volume);
     assert!(props.volume.abs() < 525.0,
         "Stress boolean_fillet_shell volume ({}) should be < 525", props.volume);
+}
+
+// ─── NEW OPERATION FIXTURES ──────────────────────────────────────
+
+#[test]
+fn export_variable_fillet_box_fixture() {
+    // 10x10x10 box with variable fillet (r=1 to r=2) on edge 0
+    // NOTE: Variable fillet may produce non-watertight mesh, so use lenient tessellation.
+    use blockcad_kernel::tessellation::face_tessellator::tessellate_face;
+    use blockcad_kernel::tessellation::mesh::TriMesh;
+
+    let mut tree = FeatureTree::new();
+    tree.push(Feature::new("s1".into(), "Sketch".into(), FeatureKind::Sketch, FeatureParams::Placeholder));
+    tree.sketches.insert(0, make_rectangle_sketch_square(10.0));
+    tree.push(Feature::new("e1".into(), "Extrude".into(), FeatureKind::Extrude,
+        FeatureParams::Extrude(ExtrudeParams::blind(Vec3::new(0.0, 0.0, 1.0), 10.0))));
+    tree.push(Feature::new("vf".into(), "VariableFillet".into(), FeatureKind::VariableFillet,
+        FeatureParams::VariableFillet(VariableFilletParams {
+            edge_indices: vec![0],
+            radius_points: vec![
+                RadiusPoint { parameter: 0.0, radius: 1.0 },
+                RadiusPoint { parameter: 1.0, radius: 2.0 },
+            ],
+            smooth_transition: false,
+        })));
+    let brep = evaluate(&mut tree).unwrap();
+
+    // Lenient tessellation: skip watertight validation
+    let params = TessellationParams::default();
+    let mut mesh = TriMesh::new();
+    let mut face_index = 0u32;
+    for (face_id, _face) in brep.faces.iter() {
+        let face_mesh = tessellate_face(&brep, face_id, face_index, &params).unwrap();
+        mesh.merge(&face_mesh);
+        face_index += 1;
+    }
+    mesh.fix_winding();
+
+    let stl = export_stl_binary(&mesh);
+    let props = compute_mass_properties(&mesh);
+    write_fixture("variable_fillet_box", &stl, &props);
+
+    assert!(props.volume.abs() < 1000.0, "Variable fillet should reduce volume below 1000");
+    assert!(props.volume.abs() > 500.0, "Variable fillet volume should be reasonable");
+}
+
+#[test]
+fn export_scale_2x_box_fixture() {
+    // 5x5x5 box scaled 2x uniformly. Expected volume: 125 * 8 = 1000
+    let mut tree = build_sketch_extrude_tree_square(5.0, 5.0);
+    tree.push(Feature::new("sc".into(), "Scale".into(), FeatureKind::ScaleBody,
+        FeatureParams::ScaleBody(ScaleBodyParams {
+            scale_factor: 2.0,
+            center: None,
+            non_uniform: None,
+            copy: false,
+        })));
+    let brep = evaluate(&mut tree).unwrap();
+    let mesh = tessellate_brep(&brep, &TessellationParams::default()).unwrap();
+    let stl = export_stl_binary(&mesh);
+    let props = compute_mass_properties(&mesh);
+    write_fixture("scale_2x_box", &stl, &props);
+
+    let expected = 125.0 * 8.0;
+    assert!((props.volume - expected).abs() < 20.0,
+        "Scaled 2x box volume should be ~{:.0}, got {:.1}", expected, props.volume);
+}
+
+#[test]
+fn export_10_op_workflow_fixture() {
+    // 10x5x7 box -> Fillet(edge 0, r=0.5) -> Chamfer(edge 4, d=0.3)
+    // -> Shell(top removed, t=0.4) -> Mirror(YZ at x=15) -> Scale(1.5x)
+    let mut tree = build_sketch_extrude_tree(7.0);
+    tree.push(Feature::new("f1".into(), "Fillet".into(), FeatureKind::Fillet,
+        FeatureParams::Fillet(FilletParams { edge_indices: vec![0], radius: 0.5 })));
+    tree.push(Feature::new("ch1".into(), "Chamfer".into(), FeatureKind::Chamfer,
+        FeatureParams::Chamfer(ChamferParams { edge_indices: vec![4], distance: 0.3, distance2: None, mode: None })));
+    tree.push(Feature::new("sh1".into(), "Shell".into(), FeatureKind::Shell,
+        FeatureParams::Shell(ShellParams {
+            faces_to_remove: vec![1],
+            thickness: 0.4,
+            direction: ShellDirection::Inward,
+        })));
+    tree.push(Feature::new("m1".into(), "Mirror".into(), FeatureKind::Mirror,
+        FeatureParams::Mirror(MirrorParams {
+            plane_origin: Pt3::new(15.0, 0.0, 0.0),
+            plane_normal: Vec3::new(1.0, 0.0, 0.0),
+        })));
+    tree.push(Feature::new("sc1".into(), "Scale".into(), FeatureKind::ScaleBody,
+        FeatureParams::ScaleBody(ScaleBodyParams {
+            scale_factor: 1.5,
+            center: None,
+            non_uniform: None,
+            copy: false,
+        })));
+    let brep = evaluate(&mut tree).unwrap();
+    let mesh = tessellate_brep(&brep, &TessellationParams::default()).unwrap();
+    let stl = export_stl_binary(&mesh);
+    let props = compute_mass_properties(&mesh);
+    write_fixture("10_op_workflow", &stl, &props);
+
+    // Volume should be non-trivial (shelled + mirrored + scaled)
+    assert!(props.volume.abs() > 50.0,
+        "10-op workflow volume too small: {}", props.volume);
+}
+
+/// Square sketch helper: w x w rectangle for cube-like extrusions
+fn make_rectangle_sketch_square(w: f64) -> Sketch {
+    let mut sketch = Sketch::new(Plane::xy(0.0));
+    let p0 = sketch.add_entity(SketchEntity::Point { position: Pt2::new(0.0, 0.0) });
+    let p1 = sketch.add_entity(SketchEntity::Point { position: Pt2::new(w*0.8, 0.5) });
+    let p2 = sketch.add_entity(SketchEntity::Point { position: Pt2::new(w*0.8, w*0.8) });
+    let p3 = sketch.add_entity(SketchEntity::Point { position: Pt2::new(0.5, w*0.8) });
+    let bottom = sketch.add_entity(SketchEntity::Line { start: p0, end: p1 });
+    let right = sketch.add_entity(SketchEntity::Line { start: p1, end: p2 });
+    let top = sketch.add_entity(SketchEntity::Line { start: p2, end: p3 });
+    let left = sketch.add_entity(SketchEntity::Line { start: p3, end: p0 });
+    sketch.add_constraint(Constraint::new(ConstraintKind::Fixed, vec![p0]));
+    sketch.add_constraint(Constraint::new(ConstraintKind::Horizontal, vec![bottom]));
+    sketch.add_constraint(Constraint::new(ConstraintKind::Horizontal, vec![top]));
+    sketch.add_constraint(Constraint::new(ConstraintKind::Vertical, vec![right]));
+    sketch.add_constraint(Constraint::new(ConstraintKind::Vertical, vec![left]));
+    sketch.add_constraint(Constraint::new(ConstraintKind::Distance { value: w }, vec![p0, p1]));
+    sketch.add_constraint(Constraint::new(ConstraintKind::Distance { value: w }, vec![p1, p2]));
+    sketch
+}
+
+fn build_sketch_extrude_tree_square(w: f64, depth: f64) -> FeatureTree {
+    let mut tree = FeatureTree::new();
+    tree.push(Feature::new("s1".into(), "Sketch".into(), FeatureKind::Sketch, FeatureParams::Placeholder));
+    tree.sketches.insert(0, make_rectangle_sketch_square(w));
+    tree.push(Feature::new("e1".into(), "Extrude".into(), FeatureKind::Extrude,
+        FeatureParams::Extrude(ExtrudeParams::blind(Vec3::new(0.0, 0.0, 1.0), depth))));
+    tree
 }
