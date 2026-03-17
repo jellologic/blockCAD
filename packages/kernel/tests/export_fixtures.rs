@@ -2001,9 +2001,6 @@ fn export_stress_full_part_3_fixture() {
 
 #[test]
 fn export_stress_pattern_cut_fixture() {
-    use blockcad_kernel::tessellation::face_tessellator::tessellate_face;
-    use blockcad_kernel::tessellation::TriMesh;
-
     // Stress test: Extrude 10x5x7 box -> LinearPattern(2x, spacing 15, X) -> CutExtrude(4x2x3 pocket)
     let mut tree = FeatureTree::new();
 
@@ -2036,18 +2033,10 @@ fn export_stress_pattern_cut_fixture() {
         FeatureParams::CutExtrude(cut_params)));
 
     let brep = evaluate(&mut tree).unwrap();
-    let params = TessellationParams::default();
-    let mut combined = TriMesh::new();
-    let mut face_index = 0u32;
-    for (face_id, _face) in brep.faces.iter() {
-        let face_mesh = tessellate_face(&brep, face_id, face_index, &params).unwrap();
-        combined.merge(&face_mesh);
-        face_index += 1;
-    }
-    combined.fix_winding();
+    let mesh = tessellate_brep(&brep, &TessellationParams::default()).unwrap();
 
-    let stl = export_stl_binary(&combined);
-    let props = compute_mass_properties(&combined);
+    let stl = export_stl_binary(&mesh);
+    let props = compute_mass_properties(&mesh);
     write_fixture("stress_pattern_cut", &stl, &props);
 
     // 2 boxes of 350 = 700, minus 24 pocket = 676

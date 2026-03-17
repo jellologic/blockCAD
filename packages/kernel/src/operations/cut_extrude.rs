@@ -179,11 +179,18 @@ pub fn cut_extrude(
     };
 
     // Find stock faces that are coplanar with the cut entry/exit planes
+    // AND contain the cut profile centroid (to avoid adding inner loops to
+    // unrelated coplanar faces, e.g. from linear patterns).
     let bottom_plane_origin = profile.plane.origin + bottom_offset;
     let top_plane_origin = profile.plane.origin + top_offset;
 
-    let bottom_face_ids = faces_on_plane(&stock, bottom_plane_origin, profile.plane.normal, 1e-6);
-    let top_face_ids = faces_on_plane(&stock, top_plane_origin, profile.plane.normal, 1e-6);
+    let bottom_centroid = compute_centroid(&cut_bottom_pts, n);
+    let top_centroid = compute_centroid(&cut_top_pts, n);
+
+    let bottom_face_ids = faces_on_plane(
+        &stock, bottom_plane_origin, profile.plane.normal, 1e-6, Some(bottom_centroid));
+    let top_face_ids = faces_on_plane(
+        &stock, top_plane_origin, profile.plane.normal, 1e-6, Some(top_centroid));
 
     if params.flip_side_to_cut {
         // Flip side to cut: remove coplanar faces and replace with cut profile faces.
@@ -314,18 +321,28 @@ pub fn cut_extrude(
     Ok(stock)
 }
 
-/// Find faces whose surface plane is coplanar with the given plane.
-fn faces_on_plane(brep: &BRep, plane_origin: Pt3, plane_normal: Vec3, tol: f64) -> Vec<FaceId> {
+/// Find faces whose surface plane is coplanar with the given plane
+/// and whose outer boundary contains the given point (if provided).
+fn faces_on_plane(
+    brep: &BRep,
+    plane_origin: Pt3,
+    plane_normal: Vec3,
+    tol: f64,
+    containment_point: Option<Pt3>,
+) -> Vec<FaceId> {
     let mut result = Vec::new();
-    for (face_id, face) in brep.faces.iter() {
-        if let Some(surf_idx) = face.surface_index {
+    for (face_id, _face) in brep.faces.iter() {
+        if let Some(surf_idx) = _face.surface_index {
             if let Ok(normal) = brep.surfaces[surf_idx].normal_at(0.0, 0.0) {
-                // Normals parallel or anti-parallel?
                 if normal.dot(&plane_normal).abs() > 1.0 - tol {
-                    // Is the face origin on the target plane?
                     if let Ok(face_origin) = brep.surfaces[surf_idx].point_at(0.0, 0.0) {
                         let dist = plane_normal.dot(&(face_origin - plane_origin)).abs();
                         if dist < tol {
+                            if let Some(pt) = containment_point {
+                                if !face_contains_point(brep, face_id, pt, &plane_normal) {
+                                    continue;
+                                }
+                            }
                             result.push(face_id);
                         }
                     }
@@ -334,6 +351,49 @@ fn faces_on_plane(brep: &BRep, plane_origin: Pt3, plane_normal: Vec3, tol: f64) 
         }
     }
     result
+}
+
+fn face_contains_point(brep: &BRep, face_id: FaceId, point: Pt3, plane_normal: &Vec3) -> bool {
+    use crate::topology::edge::Orientation;
+    let face = match brep.faces.get(face_id) { Ok(f) => f, Err(_) => return false };
+    let loop_id = match face.outer_loop { Some(id) => id, None => return false };
+    let loop_ = match brep.loops.get(loop_id) { Ok(l) => l, Err(_) => return false };
+    let mut verts: Vec<Pt3> = Vec::new();
+    for &cid in &loop_.coedges {
+        let ce = match brep.coedges.get(cid) { Ok(c) => c, Err(_) => return false };
+        let edge = match brep.edges.get(ce.edge) { Ok(e) => e, Err(_) => return false };
+        let sv = match ce.orientation { Orientation::Forward => edge.start, Orientation::Reversed => edge.end };
+        let v = match brep.vertices.get(sv) { Ok(v) => v, Err(_) => return false };
+        verts.push(v.point);
+    }
+    if verts.len() < 3 { return false; }
+    let n = plane_normal.normalize();
+    let e = verts[1] - verts[0];
+    let proj = e - n * e.dot(&n);
+    let len = proj.norm();
+    if len < 1e-12 { return false; }
+    let u = proj / len;
+    let v = n.cross(&u);
+    let origin = verts[0];
+    let poly: Vec<[f64; 2]> = verts.iter().map(|p| { let d = *p - origin; [d.dot(&u), d.dot(&v)] }).collect();
+    let d = point - origin;
+    let tp = [d.dot(&u), d.dot(&v)];
+    point_in_polygon_2d(&tp, &poly)
+}
+
+fn point_in_polygon_2d(point: &[f64; 2], polygon: &[[f64; 2]]) -> bool {
+    let n = polygon.len();
+    let (mut inside, px, py) = (false, point[0], point[1]);
+    let mut j = n - 1;
+    for i in 0..n {
+        let (yi, yj) = (polygon[i][1], polygon[j][1]);
+        let (xi, xj) = (polygon[i][0], polygon[j][0]);
+        if ((yi > py) != (yj > py)) && (px < (xj - xi) * (py - yi) / (yj - yi) + xi) {
+            inside = !inside;
+        }
+        j = i;
+    }
+    inside
 }
 
 #[cfg(test)]
