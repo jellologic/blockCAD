@@ -728,14 +728,17 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   deleteFeature: (index) => {
     const { kernel } = get();
     if (!kernel) return;
+    const features = kernel.featureList;
+    if (index < 0 || index >= features.length) return;
+
+    const json = kernel.serialize();
+    const doc = JSON.parse(json);
+    doc.features.splice(index, 1);
+
     try {
-      kernel.removeFeature(index);
-      try {
-        const mesh = kernel.tessellate();
-        set({ meshData: mesh, features: kernel.featureList, selectedFeatureId: null });
-      } catch {
-        set({ features: kernel.featureList, selectedFeatureId: null });
-      }
+      const fresh = KernelClient.deserialize(JSON.stringify(doc));
+      const mesh = fresh.tessellate();
+      set({ kernel: fresh, meshData: mesh, features: fresh.featureList, selectedFeatureId: null });
       toast.success("Feature deleted");
     } catch (err) {
       toast.error("Delete failed: " + (err instanceof Error ? err.message : String(err)));
@@ -745,25 +748,30 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   renameFeature: (index, name) => {
     const { kernel } = get();
     if (!kernel) return;
+    const json = kernel.serialize();
+    const doc = JSON.parse(json);
+    if (doc.features[index]) {
+      doc.features[index].name = name;
+    }
     try {
-      kernel.renameFeature(index, name);
-      set({ features: kernel.featureList });
-    } catch (err) {
-      toast.error("Rename failed: " + (err instanceof Error ? err.message : String(err)));
+      const fresh = KernelClient.deserialize(JSON.stringify(doc));
+      set({ kernel: fresh, features: fresh.featureList });
+    } catch {
+      toast.error("Rename failed");
     }
   },
 
   moveFeatureUp: (index) => {
+    if (index <= 0) return;
     const { kernel } = get();
-    if (!kernel || index <= 0) return;
+    if (!kernel) return;
+    const json = kernel.serialize();
+    const doc = JSON.parse(json);
+    [doc.features[index], doc.features[index - 1]] = [doc.features[index - 1], doc.features[index]];
     try {
-      kernel.moveFeature(index, index - 1);
-      try {
-        const mesh = kernel.tessellate();
-        set({ meshData: mesh, features: kernel.featureList });
-      } catch {
-        set({ features: kernel.featureList });
-      }
+      const fresh = KernelClient.deserialize(JSON.stringify(doc));
+      const mesh = fresh.tessellate();
+      set({ kernel: fresh, meshData: mesh, features: fresh.featureList });
     } catch (err) {
       toast.error("Move failed: " + (err instanceof Error ? err.message : String(err)));
     }
@@ -772,14 +780,13 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   moveFeatureDown: (index) => {
     const { kernel, features } = get();
     if (!kernel || index >= features.length - 1) return;
+    const json = kernel.serialize();
+    const doc = JSON.parse(json);
+    [doc.features[index], doc.features[index + 1]] = [doc.features[index + 1], doc.features[index]];
     try {
-      kernel.moveFeature(index, index + 1);
-      try {
-        const mesh = kernel.tessellate();
-        set({ meshData: mesh, features: kernel.featureList });
-      } catch {
-        set({ features: kernel.featureList });
-      }
+      const fresh = KernelClient.deserialize(JSON.stringify(doc));
+      const mesh = fresh.tessellate();
+      set({ kernel: fresh, meshData: mesh, features: fresh.featureList });
     } catch (err) {
       toast.error("Move failed: " + (err instanceof Error ? err.message : String(err)));
     }
@@ -801,34 +808,35 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   },
 
   rollbackTo: (index) => {
-    const { kernel } = get();
+    const { kernel, features } = get();
     if (!kernel) return;
-    try {
-      kernel.rollbackTo(index);
-      try {
-        const mesh = kernel.tessellate();
-        set({ meshData: mesh, features: kernel.featureList });
-      } catch {
-        set({ features: kernel.featureList });
+    // Suppress all features after index
+    for (let i = features.length - 1; i > index; i--) {
+      if (!features[i].suppressed) {
+        kernel.suppressFeature(i);
       }
-    } catch (err) {
-      toast.error("Rollback failed: " + (err instanceof Error ? err.message : String(err)));
+    }
+    try {
+      const mesh = kernel.tessellate();
+      set({ meshData: mesh, features: kernel.featureList });
+    } catch {
+      set({ features: kernel.featureList });
     }
   },
 
   rollForward: () => {
-    const { kernel } = get();
+    const { kernel, features } = get();
     if (!kernel) return;
-    try {
-      kernel.rollForward();
-      try {
-        const mesh = kernel.tessellate();
-        set({ meshData: mesh, features: kernel.featureList });
-      } catch {
-        set({ features: kernel.featureList });
+    for (let i = 0; i < features.length; i++) {
+      if (features[i].suppressed) {
+        kernel.unsuppressFeature(i);
       }
-    } catch (err) {
-      toast.error("Roll forward failed: " + (err instanceof Error ? err.message : String(err)));
+    }
+    try {
+      const mesh = kernel.tessellate();
+      set({ meshData: mesh, features: kernel.featureList });
+    } catch {
+      set({ features: kernel.featureList });
     }
   },
 
