@@ -8,8 +8,8 @@ import {
   Hexagon, Disc, Group, Ungroup,
   CircleDot, Move, Scaling, Umbrella, AlignVerticalSpaceBetween, Scale,
 } from "lucide-react";
-import { StepExportDialog } from "@/components/export/step-export-dialog";
-import { MassPropertiesPanel } from "@/components/analysis/mass-properties-panel";
+import { StepExportDialog } from "@/components/step-export-dialog";
+import { MassPropertiesPanel } from "@/components/mass-properties-panel";
 import { RibbonButton } from "./ribbon-button";
 import { useEditorStore } from "@/stores/editor-store";
 import { useAssemblyStore } from "@/stores/assembly-store";
