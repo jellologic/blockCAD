@@ -6,6 +6,7 @@ import { SketchPropertyPanel } from "@/components/sketch/sketch-property-panel";
 import { AssemblyTreePanel } from "@/components/assembly/assembly-tree-panel";
 import { ComponentInsertPanel } from "@/components/assembly/component-insert-panel";
 import { MatePanel } from "@/components/assembly/mate-panel";
+import { PatternPanel } from "@/components/assembly/pattern-panel";
 
 export function LeftPanel() {
   const activeOperation = useEditorStore((s) => s.activeOperation);
@@ -21,8 +22,11 @@ export function LeftPanel() {
     if (activeOp?.type === "insert-component") {
       return <ComponentInsertPanel />;
     }
-    if (activeOp?.type === "add-mate") {
+    if (activeOp?.type === "add-mate" || activeOp?.type === "edit-mate") {
       return <MatePanel />;
+    }
+    if (activeOp?.type === "add-pattern") {
+      return <PatternPanel />;
     }
     return <AssemblyTreePanel />;
   }

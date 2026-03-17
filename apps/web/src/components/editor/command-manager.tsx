@@ -348,6 +348,15 @@ export function CommandManager() {
                       />
                     </div>
                   </RibbonGroup>
+                  <RibbonGroup label="Pattern">
+                    <RibbonButton
+                      icon={Grid3x3}
+                      label="Pattern"
+                      testId="assembly-pattern"
+                      disabled={assemblyComponents.length < 1}
+                      onClick={() => startOp({ type: "add-pattern" })}
+                    />
+                  </RibbonGroup>
                   <RibbonGroup label="Assembly">
                     <div className="flex flex-col gap-0.5">
                       <RibbonButton icon={Maximize2} label="Explode" size="small" testId="assembly-explode" onClick={toggleExploded} />

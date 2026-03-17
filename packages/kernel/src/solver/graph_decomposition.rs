@@ -101,7 +101,7 @@ mod tests {
     use crate::feature_tree::FeatureTree;
 
     fn dummy_part(id: &str) -> Part {
-        Part { id: id.into(), name: id.into(), tree: FeatureTree::new() }
+        Part { id: id.into(), name: id.into(), tree: FeatureTree::new(), density: 1.0 }
     }
 
     fn dummy_mate(id: &str, a: &str, b: &str) -> Mate {

@@ -47,7 +47,7 @@ mod tests {
     use crate::feature_tree::FeatureTree;
 
     fn dummy_part(id: &str, name: &str) -> Part {
-        Part { id: id.into(), name: name.into(), tree: FeatureTree::new() }
+        Part { id: id.into(), name: name.into(), tree: FeatureTree::new(), density: 1.0 }
     }
 
     #[test]

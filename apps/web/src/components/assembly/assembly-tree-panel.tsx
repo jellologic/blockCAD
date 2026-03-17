@@ -1,7 +1,7 @@
 import { useState } from "react";
 import {
   Box, ChevronRight, ChevronDown, Link, EyeOff, Eye,
-  Package,
+  Package, Pencil, Trash2,
 } from "lucide-react";
 import { useAssemblyStore } from "@/stores/assembly-store";
 
@@ -28,6 +28,8 @@ export function AssemblyTreePanel() {
   const selectComponent = useAssemblyStore((s) => s.selectComponent);
   const suppressComponent = useAssemblyStore((s) => s.suppressComponent);
   const unsuppressComponent = useAssemblyStore((s) => s.unsuppressComponent);
+  const editMate = useAssemblyStore((s) => s.editMate);
+  const deleteMate = useAssemblyStore((s) => s.deleteMate);
 
   const [partsExpanded, setPartsExpanded] = useState(true);
   const [compsExpanded, setCompsExpanded] = useState(true);
@@ -93,9 +95,29 @@ export function AssemblyTreePanel() {
         {/* Mates section */}
         <SectionHeader label="Mates" count={mates.length} expanded={matesExpanded} onToggle={() => setMatesExpanded(!matesExpanded)} />
         {matesExpanded && mates.map((mate) => (
-          <div key={mate.id} className="flex items-center gap-2 px-4 py-0.5 text-xs text-[var(--cad-text-secondary)]">
+          <div key={mate.id} className="flex items-center gap-2 px-4 py-0.5 text-xs text-[var(--cad-text-secondary)] group">
             <Link size={14} style={{ color: "var(--cad-icon-sketch)" }} />
-            <span>{mate.kind}: {mate.compA} ↔ {mate.compB}</span>
+            <span className="flex-1 truncate">{mate.kind}: {mate.compA} ↔ {mate.compB}</span>
+            <button
+              onClick={() => editMate(mate.id)}
+              className="p-0.5 rounded hover:bg-white/10 opacity-0 group-hover:opacity-100 transition-opacity"
+              title="Edit mate"
+              data-testid={`mate-edit-${mate.id}`}
+            >
+              <Pencil size={12} />
+            </button>
+            <button
+              onClick={() => {
+                if (window.confirm("Delete this mate?")) {
+                  deleteMate(mate.id);
+                }
+              }}
+              className="p-0.5 rounded hover:bg-white/10 opacity-0 group-hover:opacity-100 transition-opacity"
+              title="Delete mate"
+              data-testid={`mate-delete-${mate.id}`}
+            >
+              <Trash2 size={12} />
+            </button>
           </div>
         ))}
         {matesExpanded && mates.length === 0 && (

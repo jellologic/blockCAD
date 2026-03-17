@@ -175,7 +175,7 @@ mod tests {
         tree.push(Feature::new("e1".into(), "Extrude".into(), FeatureKind::Extrude,
             FeatureParams::Extrude(ExtrudeParams::blind(Vec3::new(0.0, 0.0, 1.0), 7.0))));
 
-        Part { id: id.into(), name: name.into(), tree }
+        Part { id: id.into(), name: name.into(), tree, density: 1.0 }
     }
 
     #[test]

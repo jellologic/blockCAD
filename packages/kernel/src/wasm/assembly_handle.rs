@@ -31,6 +31,7 @@ impl AssemblyHandle {
             id: id.clone(),
             name: name.into(),
             tree: FeatureTree::new(),
+            density: 1.0,
         });
         id
     }
@@ -311,6 +312,64 @@ impl AssemblyHandle {
         }
 
         crate::export::gltf::export_glb_assembly(&components, &options)
+            .map_err(|e| -> JsValue { e.into() })
+    }
+
+    /// Update an existing mate. `mate_json` is a JSON object with optional fields:
+    /// `{ kind?, geometry_ref_a?, geometry_ref_b? }`. Only provided fields are updated.
+    pub fn update_mate(&mut self, mate_id: &str, mate_json: &str) -> Result<(), JsValue> {
+        #[derive(serde::Deserialize)]
+        struct MateUpdate {
+            kind: Option<crate::assembly::MateKind>,
+            geometry_ref_a: Option<crate::assembly::GeometryRef>,
+            geometry_ref_b: Option<crate::assembly::GeometryRef>,
+        }
+        let update: MateUpdate = serde_json::from_str(mate_json)
+            .map_err(|e| JsValue::from_str(&format!("Invalid mate update JSON: {}", e)))?;
+        self.assembly
+            .update_mate(mate_id, update.kind, update.geometry_ref_a, update.geometry_ref_b)
+            .map_err(|e| -> JsValue { e.into() })
+    }
+
+    /// Remove a mate by ID.
+    pub fn remove_mate(&mut self, mate_id: &str) -> Result<(), JsValue> {
+        self.assembly
+            .remove_mate(mate_id)
+            .map_err(|e| -> JsValue { e.into() })
+    }
+
+    /// Get a mate by ID as JSON. Returns null if not found.
+    pub fn get_mate(&self, mate_id: &str) -> Result<JsValue, JsValue> {
+        match self.assembly.get_mate(mate_id) {
+            Some(mate) => {
+                let json = serde_json::to_string(mate)
+                    .map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))?;
+                Ok(JsValue::from_str(&json))
+            }
+            None => Ok(JsValue::NULL),
+        }
+    }
+
+    /// Add an assembly pattern (linear or circular component array).
+    /// `pattern_json` is a JSON object matching `AssemblyPattern`.
+    /// Returns JSON array of newly created component IDs.
+    pub fn add_assembly_pattern(&mut self, pattern_json: &str) -> Result<JsValue, JsValue> {
+        let pattern: crate::assembly::pattern::AssemblyPattern =
+            serde_json::from_str(pattern_json)
+                .map_err(|e| JsValue::from_str(&format!("Invalid pattern JSON: {}", e)))?;
+        let new_ids = crate::assembly::pattern::apply_assembly_pattern(
+            &mut self.assembly,
+            &pattern,
+        )
+        .map_err(|e| -> JsValue { e.into() })?;
+        let json = serde_json::to_string(&new_ids)
+            .map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))?;
+        Ok(JsValue::from_str(&json))
+    }
+
+    /// Remove an assembly pattern and all its generated components/mates.
+    pub fn remove_assembly_pattern(&mut self, pattern_id: &str) -> Result<(), JsValue> {
+        crate::assembly::pattern::remove_assembly_pattern(&mut self.assembly, pattern_id)
             .map_err(|e| -> JsValue { e.into() })
     }
 

@@ -191,6 +191,128 @@ export class AssemblyClient {
     }
   }
 
+  /**
+   * Create a linear pattern of components.
+   * For each source, duplicates it `count-1` times along `direction` with given `spacing`.
+   * `sources` maps component names to their partId so we can create proper components.
+   * Returns the IDs of all newly created components.
+   */
+  addLinearPattern(
+    sources: Array<{ partId: string; name: string }>,
+    direction: [number, number, number],
+    spacing: number,
+    count: number,
+  ): string[] {
+    try {
+      const len = Math.sqrt(direction[0] ** 2 + direction[1] ** 2 + direction[2] ** 2);
+      if (len === 0) throw new Error("Direction vector must be non-zero");
+      const dir: [number, number, number] = [direction[0] / len, direction[1] / len, direction[2] / len];
+
+      const newIds: string[] = [];
+      for (const src of sources) {
+        for (let i = 1; i < count; i++) {
+          const offset = spacing * i;
+          const transform = [
+            1, 0, 0, 0,
+            0, 1, 0, 0,
+            0, 0, 1, 0,
+            dir[0] * offset, dir[1] * offset, dir[2] * offset, 1,
+          ];
+          const id = this.handle.add_component(
+            src.partId,
+            `${src.name} (Linear ${i + 1})`,
+            JSON.stringify(transform),
+          );
+          newIds.push(id);
+        }
+      }
+      return newIds;
+    } catch (err) {
+      throw KernelError.fromWasm(String(err));
+    }
+  }
+
+  /**
+   * Create a circular pattern of components.
+   * For each source, duplicates it `count-1` times around an axis defined by
+   * `axisOrigin` and `axisDirection`, separated by `angleSpacing` degrees.
+   * Returns the IDs of all newly created components.
+   */
+  addCircularPattern(
+    sources: Array<{ partId: string; name: string }>,
+    axisOrigin: [number, number, number],
+    axisDirection: [number, number, number],
+    angleSpacing: number,
+    count: number,
+  ): string[] {
+    try {
+      const len = Math.sqrt(axisDirection[0] ** 2 + axisDirection[1] ** 2 + axisDirection[2] ** 2);
+      if (len === 0) throw new Error("Axis direction must be non-zero");
+      const ax = axisDirection[0] / len;
+      const ay = axisDirection[1] / len;
+      const az = axisDirection[2] / len;
+
+      const newIds: string[] = [];
+      for (const src of sources) {
+        for (let i = 1; i < count; i++) {
+          const angle = (angleSpacing * i * Math.PI) / 180;
+          const c = Math.cos(angle);
+          const s = Math.sin(angle);
+          const t = 1 - c;
+
+          // Rodrigues' rotation matrix (column-major)
+          const r00 = t * ax * ax + c;
+          const r01 = t * ax * ay + s * az;
+          const r02 = t * ax * az - s * ay;
+          const r10 = t * ax * ay - s * az;
+          const r11 = t * ay * ay + c;
+          const r12 = t * ay * az + s * ax;
+          const r20 = t * ax * az + s * ay;
+          const r21 = t * ay * az - s * ax;
+          const r22 = t * az * az + c;
+
+          // Translation: rotate(-origin) then translate(+origin)
+          const ox = axisOrigin[0], oy = axisOrigin[1], oz = axisOrigin[2];
+          const tx = ox - (r00 * ox + r10 * oy + r20 * oz);
+          const ty = oy - (r01 * ox + r11 * oy + r21 * oz);
+          const tz = oz - (r02 * ox + r12 * oy + r22 * oz);
+
+          // Column-major 4x4
+          const transform = [
+            r00, r01, r02, 0,
+            r10, r11, r12, 0,
+            r20, r21, r22, 0,
+            tx,  ty,  tz,  1,
+          ];
+
+          const id = this.handle.add_component(
+            src.partId,
+            `${src.name} (Circular ${i + 1})`,
+            JSON.stringify(transform),
+          );
+          newIds.push(id);
+        }
+      }
+      return newIds;
+    } catch (err) {
+      throw KernelError.fromWasm(String(err));
+    }
+  }
+
+  /**
+   * Remove a pattern by suppressing all components that belong to it.
+   * The store layer tracks which component indices belong to each pattern.
+   */
+  removePattern(componentIndices: number[]): void {
+    try {
+      for (const index of componentIndices) {
+        this.handle.suppress_component(index);
+      }
+    } catch (err) {
+      throw KernelError.fromWasm(String(err));
+    }
+  }
+
   get partCount(): number {
     return this.handle.part_count();
   }

@@ -33,6 +33,9 @@ interface MateEntry {
   kind: string;
   compA: string;
   compB: string;
+  faceA: number;
+  faceB: number;
+  value?: number;
 }
 
 interface BomEntry {
@@ -41,9 +44,18 @@ interface BomEntry {
   quantity: number;
 }
 
+interface PatternEntry {
+  id: string;
+  type: "linear" | "circular";
+  sourceComponentIds: string[];
+  createdComponentIds: string[];
+}
+
 type AssemblyOp =
   | { type: "insert-component"; partId: string; name: string; x: number; y: number; z: number }
-  | { type: "add-mate"; kind: string; compA: string; compB: string; faceA: number; faceB: number; value?: number }
+  | { type: "add-mate"; kind: string; compA: string; compB: string; faceA: number; faceB: number; value?: number; params?: Record<string, number | [number, number, number]> }
+  | { type: "edit-mate"; mateId: string; kind: string; compA: string; compB: string; faceA: number; faceB: number; value?: number }
+  | { type: "add-pattern" }
   | null;
 
 interface AssemblyState {
@@ -56,6 +68,7 @@ interface AssemblyState {
   isAssemblyMode: boolean;
   isExploded: boolean;
   bomData: BomEntry[] | null;
+  patterns: PatternEntry[];
   activeOp: AssemblyOp;
   isLoading: boolean;
 
@@ -64,7 +77,10 @@ interface AssemblyState {
   addPart: (name: string) => string | null;
   addFeatureToPart: (partId: string, kind: string, params: any) => void;
   insertComponent: (partId: string, name: string, position?: [number, number, number]) => void;
-  addMate: (kind: string, compA: string, compB: string, faceA: number, faceB: number, value?: number) => void;
+  addMate: (kind: string, compA: string, compB: string, faceA: number, faceB: number, value?: number, params?: Record<string, number | [number, number, number]>) => void;
+  editMate: (mateId: string) => void;
+  deleteMate: (mateId: string) => void;
+  updateMate: (mateId: string, kind: string, compA: string, compB: string, faceA: number, faceB: number, value?: number) => void;
   selectComponent: (id: string | null) => void;
   suppressComponent: (index: number) => void;
   unsuppressComponent: (index: number) => void;
@@ -74,6 +90,9 @@ interface AssemblyState {
   showBom: () => void;
   hideBom: () => void;
   exportGLB: () => void;
+  createLinearPattern: (sourceComponentIds: string[], direction: [number, number, number], spacing: number, count: number) => void;
+  createCircularPattern: (sourceComponentIds: string[], axisOrigin: [number, number, number], axisDirection: [number, number, number], angleSpacing: number, count: number) => void;
+  removePattern: (patternId: string) => void;
   startOp: (op: AssemblyOp) => void;
   cancelOp: () => void;
   confirmOp: () => void;
@@ -89,6 +108,7 @@ export const useAssemblyStore = create<AssemblyState>((set, get) => ({
   isAssemblyMode: false,
   isExploded: false,
   bomData: null,
+  patterns: [],
   activeOp: null,
   isLoading: false,
 
@@ -113,6 +133,7 @@ export const useAssemblyStore = create<AssemblyState>((set, get) => ({
       components: [],
       mates: [],
       bomData: null,
+      patterns: [],
       activeOp: null,
     });
   },
@@ -153,13 +174,18 @@ export const useAssemblyStore = create<AssemblyState>((set, get) => ({
     }
   },
 
-  addMate: (kind, compA, compB, faceA, faceB, value) => {
+  addMate: (kind, compA, compB, faceA, faceB, value, params) => {
     const { assembly } = get();
     if (!assembly) return;
     try {
-      const mateKind = (value !== undefined)
-        ? { [kind]: { value } }
-        : kind;
+      let mateKind: unknown;
+      if (params && Object.keys(params).length > 0) {
+        mateKind = { [kind]: params };
+      } else if (value !== undefined) {
+        mateKind = { [kind]: { value } };
+      } else {
+        mateKind = kind;
+      }
       const id = assembly.addMate({
         id: `mate-${Date.now()}`,
         kind: mateKind,
@@ -170,12 +196,68 @@ export const useAssemblyStore = create<AssemblyState>((set, get) => ({
         suppressed: false,
       });
       set({
-        mates: [...get().mates, { id, kind, compA, compB }],
+        mates: [...get().mates, { id, kind, compA, compB, faceA, faceB, value }],
       });
       get().rebuild();
       toast.success(`${kind} mate added`);
     } catch (err) {
       toast.error("Failed to add mate: " + String(err));
+    }
+  },
+
+  editMate: (mateId) => {
+    const mate = get().mates.find((m) => m.id === mateId);
+    if (!mate) return;
+    set({
+      activeOp: {
+        type: "edit-mate",
+        mateId,
+        kind: mate.kind,
+        compA: mate.compA,
+        compB: mate.compB,
+        faceA: mate.faceA,
+        faceB: mate.faceB,
+        value: mate.value,
+      },
+    });
+  },
+
+  deleteMate: (mateId) => {
+    const { assembly } = get();
+    if (!assembly) return;
+    try {
+      assembly.removeMate(mateId);
+      set({ mates: get().mates.filter((m) => m.id !== mateId) });
+      get().rebuild();
+      toast.success("Mate deleted");
+    } catch (err) {
+      toast.error("Failed to delete mate: " + String(err));
+    }
+  },
+
+  updateMate: (mateId, kind, compA, compB, faceA, faceB, value) => {
+    const { assembly } = get();
+    if (!assembly) return;
+    try {
+      const mateKind = (value !== undefined)
+        ? { [kind]: { value } }
+        : kind;
+      assembly.updateMate(mateId, {
+        id: mateId,
+        kind: mateKind as any,
+        component_a: compA,
+        component_b: compB,
+        suppressed: false,
+      });
+      set({
+        mates: get().mates.map((m) =>
+          m.id === mateId ? { ...m, kind, compA, compB, faceA, faceB, value } : m
+        ),
+      });
+      get().rebuild();
+      toast.success("Mate updated");
+    } catch (err) {
+      toast.error("Failed to update mate: " + String(err));
     }
   },
 
@@ -247,6 +329,98 @@ export const useAssemblyStore = create<AssemblyState>((set, get) => ({
     }
   },
 
+  createLinearPattern: (sourceComponentIds, direction, spacing, count) => {
+    const { assembly, components } = get();
+    if (!assembly) return;
+    try {
+      const sources = sourceComponentIds.map((cid) => {
+        const comp = components.find((c) => c.id === cid);
+        if (!comp) throw new Error(`Component "${cid}" not found`);
+        return { partId: comp.partId, name: comp.name };
+      });
+      const newIds = assembly.addLinearPattern(sources, direction, spacing, count);
+      const patternId = `pattern-${Date.now()}`;
+      const newComponents = newIds.map((id: string, idx: number) => {
+        const srcIdx = Math.floor(idx / (count - 1));
+        const src = sources[srcIdx];
+        const instanceNum = (idx % (count - 1)) + 2;
+        return {
+          id,
+          partId: src.partId,
+          name: `${src.name} (Linear ${instanceNum})`,
+          suppressed: false,
+        };
+      });
+      set({
+        components: [...get().components, ...newComponents],
+        patterns: [...get().patterns, { id: patternId, type: "linear" as const, sourceComponentIds, createdComponentIds: newIds }],
+      });
+      get().rebuild();
+      toast.success(`Linear pattern created (${newIds.length} instances)`);
+    } catch (err) {
+      toast.error("Failed to create linear pattern: " + String(err));
+    }
+  },
+
+  createCircularPattern: (sourceComponentIds, axisOrigin, axisDirection, angleSpacing, count) => {
+    const { assembly, components } = get();
+    if (!assembly) return;
+    try {
+      const sources = sourceComponentIds.map((cid) => {
+        const comp = components.find((c) => c.id === cid);
+        if (!comp) throw new Error(`Component "${cid}" not found`);
+        return { partId: comp.partId, name: comp.name };
+      });
+      const newIds = assembly.addCircularPattern(sources, axisOrigin, axisDirection, angleSpacing, count);
+      const patternId = `pattern-${Date.now()}`;
+      const newComponents = newIds.map((id: string, idx: number) => {
+        const srcIdx = Math.floor(idx / (count - 1));
+        const src = sources[srcIdx];
+        const instanceNum = (idx % (count - 1)) + 2;
+        return {
+          id,
+          partId: src.partId,
+          name: `${src.name} (Circular ${instanceNum})`,
+          suppressed: false,
+        };
+      });
+      set({
+        components: [...get().components, ...newComponents],
+        patterns: [...get().patterns, { id: patternId, type: "circular" as const, sourceComponentIds, createdComponentIds: newIds }],
+      });
+      get().rebuild();
+      toast.success(`Circular pattern created (${newIds.length} instances)`);
+    } catch (err) {
+      toast.error("Failed to create circular pattern: " + String(err));
+    }
+  },
+
+  removePattern: (patternId) => {
+    const { assembly, patterns, components } = get();
+    if (!assembly) return;
+    const pattern = patterns.find((p) => p.id === patternId);
+    if (!pattern) return;
+    try {
+      // Find indices of the pattern's created components and suppress them
+      const indices = pattern.createdComponentIds
+        .map((cid) => components.findIndex((c) => c.id === cid))
+        .filter((i) => i >= 0);
+      assembly.removePattern(indices);
+      // Mark them suppressed in state
+      const updatedComponents = components.map((c) =>
+        pattern.createdComponentIds.includes(c.id) ? { ...c, suppressed: true } : c,
+      );
+      set({
+        components: updatedComponents,
+        patterns: patterns.filter((p) => p.id !== patternId),
+      });
+      get().rebuild();
+      toast.success("Pattern removed");
+    } catch (err) {
+      toast.error("Failed to remove pattern: " + String(err));
+    }
+  },
+
   startOp: (op) => set({ activeOp: op }),
   cancelOp: () => set({ activeOp: null }),
 
@@ -256,7 +430,9 @@ export const useAssemblyStore = create<AssemblyState>((set, get) => ({
     if (activeOp.type === "insert-component") {
       get().insertComponent(activeOp.partId, activeOp.name, [activeOp.x, activeOp.y, activeOp.z]);
     } else if (activeOp.type === "add-mate") {
-      get().addMate(activeOp.kind, activeOp.compA, activeOp.compB, activeOp.faceA, activeOp.faceB, activeOp.value);
+      get().addMate(activeOp.kind, activeOp.compA, activeOp.compB, activeOp.faceA, activeOp.faceB, activeOp.value, activeOp.params);
+    } else if (activeOp.type === "edit-mate") {
+      get().updateMate(activeOp.mateId, activeOp.kind, activeOp.compA, activeOp.compB, activeOp.faceA, activeOp.faceB, activeOp.value);
     }
     set({ activeOp: null });
   },

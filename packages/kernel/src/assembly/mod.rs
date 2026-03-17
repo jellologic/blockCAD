@@ -7,7 +7,9 @@ pub mod evaluator;
 pub mod interference;
 pub mod bom;
 pub mod mass;
+pub mod pattern;
 
+use crate::error::{KernelError, KernelResult};
 use crate::feature_tree::FeatureTree;
 use crate::geometry::Mat4;
 use crate::geometry::transform;
@@ -18,6 +20,8 @@ pub struct Part {
     pub id: String,
     pub name: String,
     pub tree: FeatureTree,
+    /// Material density (kg/m³ or arbitrary units). Default 1.0.
+    pub density: f64,
 }
 
 /// A component instance — a Part placed at a specific position/orientation.
@@ -112,6 +116,11 @@ pub enum MateKind {
     // Advanced mates
     Width,
     Symmetric,
+    // Mechanical mates (continued)
+    RackPinion { pitch_radius: f64 },
+    Cam { eccentricity: f64, base_radius: f64 },
+    Slot { axis: [f64; 3] },
+    UniversalJoint,
 }
 
 /// A step in an exploded view — translates a component outward.
@@ -129,6 +138,7 @@ pub struct Assembly {
     pub components: Vec<Component>,
     pub mates: Vec<Mate>,
     pub explosion_steps: Vec<ExplosionStep>,
+    pub patterns: Vec<pattern::AssemblyPattern>,
 }
 
 impl Assembly {
@@ -138,6 +148,7 @@ impl Assembly {
             components: Vec::new(),
             mates: Vec::new(),
             explosion_steps: Vec::new(),
+            patterns: Vec::new(),
         }
     }
 
@@ -179,10 +190,142 @@ impl Assembly {
             false
         }
     }
+
+    /// Get a mate by ID (for editing UI).
+    pub fn get_mate(&self, mate_id: &str) -> Option<&Mate> {
+        self.mates.iter().find(|m| m.id == mate_id)
+    }
+
+    /// Update an existing mate's kind and/or geometry references.
+    /// Only fields provided as `Some` are updated; `None` fields are left unchanged.
+    pub fn update_mate(
+        &mut self,
+        mate_id: &str,
+        kind: Option<MateKind>,
+        geometry_ref_a: Option<GeometryRef>,
+        geometry_ref_b: Option<GeometryRef>,
+    ) -> KernelResult<()> {
+        let mate = self
+            .mates
+            .iter_mut()
+            .find(|m| m.id == mate_id)
+            .ok_or_else(|| KernelError::NotFound(format!("Mate '{}' not found", mate_id)))?;
+        if let Some(k) = kind {
+            mate.kind = k;
+        }
+        if let Some(ref_a) = geometry_ref_a {
+            mate.geometry_ref_a = ref_a;
+        }
+        if let Some(ref_b) = geometry_ref_b {
+            mate.geometry_ref_b = ref_b;
+        }
+        Ok(())
+    }
+
+    /// Remove a mate by ID.
+    pub fn remove_mate(&mut self, mate_id: &str) -> KernelResult<()> {
+        let idx = self
+            .mates
+            .iter()
+            .position(|m| m.id == mate_id)
+            .ok_or_else(|| KernelError::NotFound(format!("Mate '{}' not found", mate_id)))?;
+        self.mates.remove(idx);
+        Ok(())
+    }
 }
 
 impl Default for Assembly {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_test_mate(id: &str) -> Mate {
+        Mate {
+            id: id.into(),
+            kind: MateKind::Coincident,
+            component_a: "comp-a".into(),
+            component_b: "comp-b".into(),
+            geometry_ref_a: GeometryRef::Face(0),
+            geometry_ref_b: GeometryRef::Face(1),
+            suppressed: false,
+        }
+    }
+
+    #[test]
+    fn get_mate_returns_existing() {
+        let mut asm = Assembly::new();
+        asm.mates.push(make_test_mate("mate-1"));
+        let mate = asm.get_mate("mate-1");
+        assert!(mate.is_some());
+        assert_eq!(mate.unwrap().id, "mate-1");
+    }
+
+    #[test]
+    fn get_mate_returns_none_for_missing() {
+        let asm = Assembly::new();
+        assert!(asm.get_mate("no-such-mate").is_none());
+    }
+
+    #[test]
+    fn update_mate_kind() {
+        let mut asm = Assembly::new();
+        asm.mates.push(make_test_mate("mate-1"));
+
+        asm.update_mate("mate-1", Some(MateKind::Distance { value: 5.0 }), None, None)
+            .unwrap();
+
+        let mate = asm.get_mate("mate-1").unwrap();
+        assert!(matches!(mate.kind, MateKind::Distance { value } if (value - 5.0).abs() < 1e-12));
+    }
+
+    #[test]
+    fn update_mate_geometry_refs() {
+        let mut asm = Assembly::new();
+        asm.mates.push(make_test_mate("mate-1"));
+
+        asm.update_mate(
+            "mate-1",
+            None,
+            Some(GeometryRef::Edge(3)),
+            Some(GeometryRef::Vertex(7)),
+        )
+        .unwrap();
+
+        let mate = asm.get_mate("mate-1").unwrap();
+        assert!(matches!(mate.geometry_ref_a, GeometryRef::Edge(3)));
+        assert!(matches!(mate.geometry_ref_b, GeometryRef::Vertex(7)));
+        // kind should be unchanged
+        assert!(matches!(mate.kind, MateKind::Coincident));
+    }
+
+    #[test]
+    fn update_nonexistent_mate_returns_error() {
+        let mut asm = Assembly::new();
+        let result = asm.update_mate("no-such-mate", Some(MateKind::Parallel), None, None);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn remove_mate_success() {
+        let mut asm = Assembly::new();
+        asm.mates.push(make_test_mate("mate-1"));
+        asm.mates.push(make_test_mate("mate-2"));
+
+        asm.remove_mate("mate-1").unwrap();
+        assert_eq!(asm.mates.len(), 1);
+        assert!(asm.get_mate("mate-1").is_none());
+        assert!(asm.get_mate("mate-2").is_some());
+    }
+
+    #[test]
+    fn remove_nonexistent_mate_returns_error() {
+        let mut asm = Assembly::new();
+        let result = asm.remove_mate("no-such-mate");
+        assert!(result.is_err());
     }
 }

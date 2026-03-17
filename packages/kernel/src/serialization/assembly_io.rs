@@ -62,6 +62,7 @@ pub fn deserialize_assembly(doc: &AssemblyDocument) -> KernelResult<Assembly> {
             id: format!("part-{}", i),
             name: part_doc.metadata.name.clone(),
             tree,
+            density: 1.0,
         });
     }
 
@@ -70,6 +71,7 @@ pub fn deserialize_assembly(doc: &AssemblyDocument) -> KernelResult<Assembly> {
         components: doc.components.clone(),
         mates: doc.mates.clone(),
         explosion_steps: doc.explosion_steps.clone(),
+        patterns: Vec::new(),
     })
 }
 
@@ -89,7 +91,7 @@ mod tests {
             FeatureKind::Extrude,
             FeatureParams::Extrude(ExtrudeParams::blind(Vec3::new(0.0, 0.0, 1.0), 10.0)),
         ));
-        Part { id: id.into(), name: name.into(), tree }
+        Part { id: id.into(), name: name.into(), tree, density: 1.0 }
     }
 
     #[test]
