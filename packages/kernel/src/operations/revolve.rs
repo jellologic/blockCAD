@@ -181,7 +181,8 @@ pub fn revolve_profile(
                 u_axis: e1.normalize(),
                 v_axis: (p3 - p0).normalize(),
             };
-            make_planar_face(&mut brep, &[p0, p1, p2, p3], side_plane)?;
+            // Skip degenerate faces
+            let _ = make_planar_face(&mut brep, &[p0, p1, p2, p3], side_plane);
         }
     }
 

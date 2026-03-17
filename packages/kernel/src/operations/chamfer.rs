@@ -97,7 +97,12 @@ pub fn chamfer_edges(brep: &BRep, params: &ChamferParams) -> KernelResult<BRep> 
     for &edge_idx in &params.edge_indices {
         let se = &shared_edges[edge_idx as usize];
 
-        let edge_dir = (se.end - se.start).normalize();
+        // Skip degenerate (seam) edges where start and end coincide.
+        let edge_vec = se.end - se.start;
+        if edge_vec.norm() < 1e-6 {
+            continue;
+        }
+        let edge_dir = edge_vec.normalize();
 
         // Get face normals
         let face_a = brep.faces.get(se.face_a)?;
@@ -112,6 +117,17 @@ pub fn chamfer_edges(brep: &BRep, params: &ChamferParams) -> KernelResult<BRep> 
 
         let normal_a = brep.surfaces[surf_a].normal_at(0.0, 0.0)?;
         let normal_b = brep.surfaces[surf_b].normal_at(0.0, 0.0)?;
+
+        // Skip nearly-coplanar edges (dihedral angle < ~3 degrees).
+        // These are typically revolution seam edges or tessellation artifacts
+        // where there is no real corner to chamfer.
+        let cos_angle = normal_a.dot(&normal_b);
+        let half_angle = ((1.0 - cos_angle).max(0.0))
+            .sqrt()
+            .atan2(((1.0 + cos_angle).max(0.0)).sqrt());
+        if half_angle.abs() < 0.025 {
+            continue;
+        }
 
         // Compute offset directions perpendicular to edge, in each face's plane
         let mut offset_a = normal_a.cross(&edge_dir).normalize();
@@ -169,6 +185,18 @@ pub fn chamfer_edges(brep: &BRep, params: &ChamferParams) -> KernelResult<BRep> 
         }
     }
 
+    // Build a position-based lookup for vertex modifications so that vertices
+    // at the same geometric position (e.g. revolution seam duplicates) also get
+    // the correct trim applied, even if they have different VertexIds.
+    let pos_tol2 = 1e-9 * 1e-9;
+    let vertex_mod_positions: Vec<(Pt3, Pt3)> = vertex_mods
+        .iter()
+        .map(|(vid, &new_pos)| {
+            let old_pos = brep.vertices.get(*vid).map(|v| v.point).unwrap_or(new_pos);
+            (old_pos, new_pos)
+        })
+        .collect();
+
     // Reconstruct the BRep
     let mut result = BRep::new();
 
@@ -208,59 +236,79 @@ pub fn chamfer_edges(brep: &BRep, params: &ChamferParams) -> KernelResult<BRep> 
             let vid = orig_vids[i];
             let pos = orig_positions[i];
 
+            // 1. Check vertex_mods by exact VertexId (faces A/B of the chamfered edge)
             if let Some(&new_pos) = vertex_mods.get(&vid) {
                 points.push(new_pos);
-            } else {
-                // Check if this vertex position matches an endpoint that needs splitting
-                let mut split_done = false;
-                for ep in &endpoint_splits {
-                    if face_id == ep.face_a || face_id == ep.face_b {
-                        continue;
-                    }
-                    let d = pos - ep.original_pos;
-                    if d.x * d.x + d.y * d.y + d.z * d.z < tol2 {
-                        // Determine correct winding order using adjacent vertices.
-                        // The previous vertex in the polygon tells us which direction
-                        // we're coming from, and the next vertex tells us where we go.
-                        // The split point closest to the previous vertex should come first.
-                        let prev_pos = orig_positions[(i + n - 1) % n];
-                        let prev_actual = if let Some(&mp) = vertex_mods.get(&orig_vids[(i + n - 1) % n]) {
-                            mp
-                        } else {
-                            prev_pos
-                        };
+                continue;
+            }
 
-                        let first = ep.split_points.first().unwrap();
-                        let last = ep.split_points.last().unwrap();
-
-                        let dist_first_to_prev = {
-                            let d = *first - prev_actual;
-                            d.x * d.x + d.y * d.y + d.z * d.z
-                        };
-                        let dist_last_to_prev = {
-                            let d = *last - prev_actual;
-                            d.x * d.x + d.y * d.y + d.z * d.z
-                        };
-
-                        if dist_first_to_prev <= dist_last_to_prev {
-                            // first (ca) is closer to prev -> forward order
-                            for pt in &ep.split_points {
-                                points.push(*pt);
-                            }
-                        } else {
-                            // last (cb) is closer to prev -> reverse order
-                            for pt in ep.split_points.iter().rev() {
-                                points.push(*pt);
-                            }
-                        }
-                        split_done = true;
-                        break;
-                    }
+            // 2. Check endpoint splits by position (third-party faces at edge endpoints)
+            let mut split_done = false;
+            {
+            for ep in &endpoint_splits {
+                if face_id == ep.face_a || face_id == ep.face_b {
+                    continue;
                 }
-                if !split_done {
-                    points.push(pos);
+                let d = pos - ep.original_pos;
+                if d.x * d.x + d.y * d.y + d.z * d.z < tol2 {
+                    let prev_pos = orig_positions[(i + n - 1) % n];
+                    let prev_vid = orig_vids[(i + n - 1) % n];
+                    let prev_actual = vertex_mods.get(&prev_vid).copied().or_else(|| {
+                        vertex_mod_positions.iter().find_map(|(old_p, new_p)| {
+                            let d = prev_pos - *old_p;
+                            if d.x * d.x + d.y * d.y + d.z * d.z < pos_tol2 {
+                                Some(*new_p)
+                            } else {
+                                None
+                            }
+                        })
+                    }).unwrap_or(prev_pos);
+
+                    let first = ep.split_points.first().unwrap();
+                    let last = ep.split_points.last().unwrap();
+
+                    let dist_first_to_prev = {
+                        let d = *first - prev_actual;
+                        d.x * d.x + d.y * d.y + d.z * d.z
+                    };
+                    let dist_last_to_prev = {
+                        let d = *last - prev_actual;
+                        d.x * d.x + d.y * d.y + d.z * d.z
+                    };
+
+                    if dist_first_to_prev <= dist_last_to_prev {
+                        for pt in &ep.split_points {
+                            points.push(*pt);
+                        }
+                    } else {
+                        for pt in ep.split_points.iter().rev() {
+                            points.push(*pt);
+                        }
+                    }
+                    split_done = true;
+                    break;
                 }
             }
+            } // end if !has_pos_mod
+            if split_done {
+                continue;
+            }
+
+            // 3. Position-based vertex_mods fallback for revolution seam duplicates
+            if let Some(new_pos) = vertex_mod_positions.iter().find_map(|(old_p, new_p)| {
+                let d = pos - *old_p;
+                if d.x * d.x + d.y * d.y + d.z * d.z < pos_tol2 {
+                    Some(*new_p)
+                } else {
+                    None
+                }
+            }) {
+                points.push(new_pos);
+                continue;
+            }
+
+            // 4. No modification — keep original position
+            points.push(pos);
         }
 
         // Get origin from original surface
@@ -281,7 +329,7 @@ pub fn chamfer_edges(brep: &BRep, params: &ChamferParams) -> KernelResult<BRep> 
             v_axis,
         };
 
-        make_planar_face(&mut result, &points, plane)?;
+        let _ = make_planar_face(&mut result, &points, plane);
     }
 
     // Add chamfer faces
@@ -295,7 +343,7 @@ pub fn chamfer_edges(brep: &BRep, params: &ChamferParams) -> KernelResult<BRep> 
             u_axis: edge1,
             v_axis: edge2,
         };
-        make_planar_face(&mut result, &cf.points, plane)?;
+        let _ = make_planar_face(&mut result, &cf.points, plane);
     }
 
     // Rebuild shell and solid

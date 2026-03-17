@@ -8,8 +8,6 @@ Analytical properties (plain revolve, before fillet):
   - Bounding box: [-10, 10] x [0, 3] z [-10, 10]
 
 The fillet removes a small amount of material, so volume should be ~707 +/- tolerance.
-The tessellator does not yet produce watertight meshes for fillet on revolved bodies,
-so volume computed via the divergence theorem is approximate.
 """
 
 import math
@@ -18,11 +16,9 @@ import pytest
 
 # Plain revolve volume (before fillet)
 PLAIN_REVOLVE_VOLUME = math.pi * 75.0 * 3.0  # ~706.86
-# The fillet + non-watertight mesh means volume deviates more than usual
-VOLUME_TOLERANCE = 100.0
+VOLUME_TOLERANCE = 50.0
 
 
-@pytest.mark.xfail(reason="Tessellator does not yet produce watertight meshes for fillet on revolved bodies")
 def test_watertight(stress_revolve_fillet):
     mesh, _ = stress_revolve_fillet
     assert mesh.is_watertight, "Revolve+fillet mesh should be watertight (closed solid)"
@@ -55,8 +51,6 @@ def test_bounding_box(stress_revolve_fillet):
 def test_kernel_volume_match(stress_revolve_fillet):
     """trimesh volume should match blockCAD's divergence-theorem volume."""
     mesh, props = stress_revolve_fillet
-    # Non-watertight mesh means both trimesh and kernel volumes are approximate;
-    # use a wider tolerance.
-    assert abs(abs(mesh.volume) - abs(props["volume"])) < 60.0, (
+    assert abs(abs(mesh.volume) - abs(props["volume"])) < 20.0, (
         f"trimesh volume ({mesh.volume:.1f}) should match kernel ({props['volume']:.1f})"
     )

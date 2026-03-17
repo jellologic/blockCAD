@@ -33,7 +33,6 @@ def test_boolean_subtract_bounding_box(boolean_subtract):
     assert abs(bbox_max[2] - 7.0) < 0.5, f"Bbox max z should be ~7, got {bbox_max[2]}"
 
 
-@pytest.mark.xfail(reason="Boolean subtract does not yet produce watertight mesh")
 def test_boolean_subtract_matches_kernel_volume(boolean_subtract):
     """trimesh volume should match blockCAD's divergence-theorem volume."""
     mesh, props = boolean_subtract

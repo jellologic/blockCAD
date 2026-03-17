@@ -19,8 +19,32 @@ use super::brep::BRep;
 /// Creates vertices, edges (Line3), coedges, a loop, and a face.
 /// Returns the FaceId.
 pub fn make_planar_face(brep: &mut BRep, points: &[Pt3], plane: Plane) -> KernelResult<super::face::FaceId> {
+    // Remove consecutive duplicate points (e.g. from degenerate seam edges on revolved bodies).
+    let tol2 = 1e-12;
+    let mut deduped: Vec<Pt3> = Vec::with_capacity(points.len());
+    for &p in points {
+        if let Some(&last) = deduped.last() {
+            let d = p - last;
+            if d.x * d.x + d.y * d.y + d.z * d.z < tol2 {
+                continue;
+            }
+        }
+        deduped.push(p);
+    }
+    // Check wrap-around: if last == first, drop last
+    if deduped.len() > 1 {
+        let d = *deduped.last().unwrap() - deduped[0];
+        if d.x * d.x + d.y * d.y + d.z * d.z < tol2 {
+            deduped.pop();
+        }
+    }
+    let points = &deduped;
     let n = points.len();
-    assert!(n >= 3, "Need at least 3 points for a face");
+    if n < 3 {
+        return Err(crate::error::KernelError::Geometry(
+            format!("Degenerate face: only {} unique points after deduplication", n),
+        ));
+    }
 
     // Add surface
     let surf_idx = brep.add_surface(Box::new(plane));

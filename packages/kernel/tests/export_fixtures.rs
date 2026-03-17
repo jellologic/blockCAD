@@ -936,9 +936,6 @@ fn export_revolve_shell_fixture() {
 
 #[test]
 fn export_stress_revolve_fillet_fixture() {
-    use blockcad_kernel::tessellation::face_tessellator::tessellate_face;
-    use blockcad_kernel::tessellation::mesh::TriMesh;
-
     let mut tree = FeatureTree::new();
     tree.push(Feature::new("s1".into(), "Sketch".into(), FeatureKind::Sketch, FeatureParams::Placeholder));
     tree.sketches.insert(0, make_revolve_sketch());
@@ -951,19 +948,7 @@ fn export_stress_revolve_fillet_fixture() {
         FeatureParams::Fillet(FilletParams { edge_indices: vec![0], radius: 0.5 })));
     let brep = evaluate(&mut tree).unwrap();
 
-    // Tessellate face-by-face, skipping watertight validation (known limitation
-    // for fillet on revolved bodies -- the tessellator doesn't yet stitch all
-    // fillet faces perfectly).
-    let params = TessellationParams::default();
-    let mut mesh = TriMesh::new();
-    let mut face_index = 0u32;
-    for (face_id, _face) in brep.faces.iter() {
-        let face_mesh = tessellate_face(&brep, face_id, face_index, &params).unwrap();
-        mesh.merge(&face_mesh);
-        face_index += 1;
-    }
-    mesh.fix_winding();
-
+    let mesh = tessellate_brep(&brep, &TessellationParams::default()).unwrap();
     let stl = export_stl_binary(&mesh);
     let props = compute_mass_properties(&mesh);
     write_fixture("stress_revolve_fillet", &stl, &props);
@@ -1074,7 +1059,7 @@ fn export_stress_box_mirror_fillet_fixture() {
     let brep = evaluate(&mut tree).unwrap();
     let params = TessellationParams::default();
 
-    // Tessellate per-face and merge (skip watertight validation for stress test)
+    // Tessellate per-face and merge (mirror+fillet watertightness is a known limitation)
     let mut combined = TriMesh::new();
     let mut face_index = 0u32;
     for (face_id, _face) in brep.faces.iter() {
@@ -1757,10 +1742,8 @@ fn export_stress_revolve_cut_chamfer_fixture() {
     use blockcad_kernel::tessellation::face_tessellator::tessellate_face;
     use blockcad_kernel::tessellation::mesh::TriMesh;
 
-    // Goal: Full 360-degree revolve -> CutExtrude(pocket) -> Chamfer
-    // Known limitation: Chamfer on revolved bodies fails with "Degenerate line"
-    // because seam edges on the cylindrical surface collapse to zero length.
-    // Fallback: produce revolve+cut fixture (chamfer skipped).
+    // Full 360-degree revolve -> CutExtrude(pocket) -> Chamfer
+    // Chamfer now skips degenerate seam edges on revolved bodies.
 
     // Step 1: Full 360-degree revolve of rectangle [5,10]x[0,3] around Y-axis -> annular solid
     let mut tree = FeatureTree::new();
@@ -1783,58 +1766,25 @@ fn export_stress_revolve_cut_chamfer_fixture() {
     tree.push(Feature::new("ch1".into(), "Chamfer".into(), FeatureKind::Chamfer,
         FeatureParams::Chamfer(ChamferParams { edge_indices: vec![0], distance: 0.5, distance2: None })));
 
-    // Try the full pipeline; if chamfer fails on revolve body, fall back to revolve+cut
-    let result = evaluate(&mut tree);
-    let (_mesh, props) = if let Ok(brep) = result {
-        let params = TessellationParams::default();
-        let mut mesh = TriMesh::new();
-        let mut face_index = 0u32;
-        for (face_id, _face) in brep.faces.iter() {
-            let face_mesh = tessellate_face(&brep, face_id, face_index, &params).unwrap();
-            mesh.merge(&face_mesh);
-            face_index += 1;
-        }
-        mesh.fix_winding();
-        let stl = export_stl_binary(&mesh);
-        let props = compute_mass_properties(&mesh);
-        write_fixture("stress_revolve_cut_chamfer", &stl, &props);
-        (mesh, props)
-    } else {
-        // Fallback: revolve + cut only (chamfer on revolved bodies is a known limitation)
-        eprintln!("NOTE: Chamfer on revolve body failed, using revolve+cut fallback");
-        let mut tree2 = FeatureTree::new();
-        tree2.push(Feature::new("s1".into(), "Sketch".into(), FeatureKind::Sketch, FeatureParams::Placeholder));
-        tree2.sketches.insert(0, make_revolve_sketch());
-        tree2.push(Feature::new("r1".into(), "Revolve".into(), FeatureKind::Revolve,
-            FeatureParams::Revolve(RevolveParams::full(
-                Pt3::new(0.0, 0.0, 0.0),
-                Vec3::new(0.0, 1.0, 0.0),
-            ))));
-        tree2.push(Feature::new("s2".into(), "Sketch".into(), FeatureKind::Sketch, FeatureParams::Placeholder));
-        tree2.sketches.insert(2, make_revolve_pocket_sketch());
-        let cut_params2 = CutExtrudeParams::blind(Vec3::new(0.0, 0.0, 1.0), 2.0);
-        tree2.push(Feature::new("ce1".into(), "CutExtrude".into(), FeatureKind::CutExtrude,
-            FeatureParams::CutExtrude(cut_params2)));
-
-        let brep = evaluate(&mut tree2).unwrap();
-        let params = TessellationParams::default();
-        let mut mesh = TriMesh::new();
-        let mut face_index = 0u32;
-        for (face_id, _face) in brep.faces.iter() {
-            let face_mesh = tessellate_face(&brep, face_id, face_index, &params).unwrap();
-            mesh.merge(&face_mesh);
-            face_index += 1;
-        }
-        mesh.fix_winding();
-        let stl = export_stl_binary(&mesh);
-        let props = compute_mass_properties(&mesh);
-        write_fixture("stress_revolve_cut_chamfer", &stl, &props);
-        (mesh, props)
-    };
+    // Chamfer should now succeed on revolved bodies
+    let brep = evaluate(&mut tree).expect("Revolve+cut+chamfer should succeed");
+    let params = TessellationParams::default();
+    let mut mesh = TriMesh::new();
+    let mut face_index = 0u32;
+    for (face_id, _face) in brep.faces.iter() {
+        let face_mesh = tessellate_face(&brep, face_id, face_index, &params).unwrap();
+        mesh.merge(&face_mesh);
+        face_index += 1;
+    }
+    mesh.fix_winding();
+    let stl = export_stl_binary(&mesh);
+    let props = compute_mass_properties(&mesh);
+    write_fixture("stress_revolve_cut_chamfer", &stl, &props);
+    let (_mesh, props) = (mesh, props);
 
     // Plain revolve volume: pi * (100 - 25) * 3 = 225*pi ~ 706.86
     // Pocket removes ~2*1.5*2 = 6.0
-    // Chamfer (if applied) removes a small wedge
+    // Chamfer removes a small wedge
     let plain_volume = std::f64::consts::PI * 75.0 * 3.0;
     assert!((props.volume.abs() - plain_volume).abs() < 80.0,
         "Revolve+cut+chamfer volume should be ~{:.0}, got {:.1}", plain_volume, props.volume);
