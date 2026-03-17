@@ -63,15 +63,6 @@ impl KernelHandle {
             .map_err(|e| e.into())
     }
 
-    /// Tessellate for viewport display (coarser LOD, skips validation for speed).
-    pub fn tessellate_viewport(
-        &mut self,
-    ) -> Result<Vec<u8>, JsValue> {
-        self.core
-            .tessellate_viewport()
-            .map_err(|e| e.into())
-    }
-
     /// Get the feature list as JSON.
     pub fn get_features_json(&self) -> Result<String, JsValue> {
         self.core.get_features_json().map_err(|e| e.into())
@@ -185,6 +176,19 @@ impl KernelHandle {
             .map_err(|e| -> JsValue { e.into() })?;
         serde_json::to_string(&props)
             .map_err(|e| JsValue::from_str(&e.to_string()))
+    }
+
+    /// Evaluate the feature tree and return cache metrics as JSON.
+    /// Returns `{"features_evaluated": N, "features_skipped_param_hash": N, "features_skipped_fingerprint": N}`
+    pub fn evaluate_with_metrics(&mut self) -> Result<String, JsValue> {
+        let metrics = self.core.evaluate_with_metrics().map_err(|e| -> JsValue { e.into() })?;
+        let json = format!(
+            r#"{{"features_evaluated":{},"features_skipped_param_hash":{},"features_skipped_fingerprint":{}}}"#,
+            metrics.features_evaluated,
+            metrics.features_skipped_param_hash,
+            metrics.features_skipped_fingerprint,
+        );
+        Ok(json)
     }
 
     // --- Server-only operations ---

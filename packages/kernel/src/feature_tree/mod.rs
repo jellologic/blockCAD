@@ -5,6 +5,7 @@ pub mod kind;
 pub mod params;
 pub mod tree;
 
+pub use evaluator::EvalMetrics;
 pub use feature::{Feature, FeatureId, FeatureState};
 pub use kind::FeatureKind;
 pub use params::FeatureParams;

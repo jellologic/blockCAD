@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use crate::error::{KernelError, KernelResult};
 use crate::operations::extrude::ExtrudeProfile;
 use crate::sketch::Sketch;
+use crate::topology::brep::BRepFingerprint;
 use crate::topology::BRep;
 
 use super::feature::{Feature, FeatureState};
@@ -19,6 +20,12 @@ pub struct FeatureTree {
     cursor: Option<usize>,
     /// Cached BRep at each feature step. None = needs re-evaluation.
     cache: Vec<Option<BRep>>,
+    /// Param hash for each feature. Used for Tier 1 cache validation:
+    /// if the hash hasn't changed, the feature doesn't need re-evaluation.
+    param_hashes: Vec<Option<u64>>,
+    /// BRep fingerprint at each feature step. Used for Tier 2 cache validation:
+    /// if the fingerprint hasn't changed after re-evaluation, downstream cache is still valid.
+    fingerprints: Vec<Option<BRepFingerprint>>,
     /// Sketch data associated with Sketch features, keyed by feature index.
     /// Stored separately because Sketch is not serializable through FeatureParams.
     pub sketches: HashMap<usize, Sketch>,
@@ -36,6 +43,8 @@ impl FeatureTree {
             features: Vec::new(),
             cursor: None,
             cache: Vec::new(),
+            param_hashes: Vec::new(),
+            fingerprints: Vec::new(),
             sketches: HashMap::new(),
             sketch_profiles: HashMap::new(),
             datum_planes: HashMap::new(),
@@ -47,6 +56,8 @@ impl FeatureTree {
     pub fn push(&mut self, feature: Feature) {
         self.features.push(feature);
         self.cache.push(None);
+        self.param_hashes.push(None);
+        self.fingerprints.push(None);
         self.cursor = Some(self.features.len() - 1);
     }
 
@@ -59,8 +70,12 @@ impl FeatureTree {
         };
         self.features.insert(index, feature);
         self.cache.insert(index, None);
+        self.param_hashes.insert(index, None);
+        self.fingerprints.insert(index, None);
         for i in index..self.cache.len() {
             self.cache[i] = None;
+            self.param_hashes[i] = None;
+            self.fingerprints[i] = None;
         }
         self.cursor = Some(index);
         Ok(index)
@@ -93,6 +108,8 @@ impl FeatureTree {
         feature.suppressed = true;
         for i in index..self.cache.len() {
             self.cache[i] = None;
+            self.param_hashes[i] = None;
+            self.fingerprints[i] = None;
         }
         Ok(())
     }
@@ -106,6 +123,8 @@ impl FeatureTree {
         feature.state = FeatureState::Pending;
         for i in index..self.cache.len() {
             self.cache[i] = None;
+            self.param_hashes[i] = None;
+            self.fingerprints[i] = None;
         }
         Ok(())
     }
@@ -148,14 +167,44 @@ impl FeatureTree {
         }
     }
 
-    /// Take the cached BRep out of the slot (leaving None), avoiding a clone.
-    pub fn take_cache(&mut self, index: usize) -> Option<BRep> {
-        self.cache.get_mut(index).and_then(|c| c.take())
+    /// Clear the cache entry at the given index (set to None).
+    pub fn set_cache_none(&mut self, index: usize) {
+        if index < self.cache.len() {
+            self.cache[index] = None;
+            self.param_hashes[index] = None;
+            self.fingerprints[index] = None;
+        }
     }
 
     pub fn invalidate_from(&mut self, index: usize) {
         for i in index..self.cache.len() {
             self.cache[i] = None;
+            self.param_hashes[i] = None;
+            self.fingerprints[i] = None;
+        }
+    }
+
+    /// Get the param hash for a feature at the given index.
+    pub fn param_hash_at(&self, index: usize) -> Option<u64> {
+        self.param_hashes.get(index).and_then(|h| *h)
+    }
+
+    /// Set the param hash for a feature at the given index.
+    pub fn set_param_hash(&mut self, index: usize, hash: u64) {
+        if index < self.param_hashes.len() {
+            self.param_hashes[index] = Some(hash);
+        }
+    }
+
+    /// Get the BRep fingerprint for a feature at the given index.
+    pub fn fingerprint_at(&self, index: usize) -> Option<&BRepFingerprint> {
+        self.fingerprints.get(index).and_then(|f| f.as_ref())
+    }
+
+    /// Set the BRep fingerprint for a feature at the given index.
+    pub fn set_fingerprint(&mut self, index: usize, fp: BRepFingerprint) {
+        if index < self.fingerprints.len() {
+            self.fingerprints[index] = Some(fp);
         }
     }
 }
