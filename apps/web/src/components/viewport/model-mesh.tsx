@@ -108,6 +108,58 @@ function FaceHighlight({
   );
 }
 
+/**
+ * Edge highlight overlay for a specific face.
+ * Renders the edges of the triangles belonging to the face as wireframe lines.
+ */
+function EdgeHighlight({
+  meshData,
+  faceIndex,
+  color,
+}: {
+  meshData: MeshData;
+  faceIndex: number;
+  color: string;
+}) {
+  const geometry = useMemo(() => {
+    const positions: number[] = [];
+
+    for (let i = 0; i < meshData.faceIds.length; i++) {
+      if (meshData.faceIds[i] !== faceIndex) continue;
+
+      for (let edge = 0; edge < 3; edge++) {
+        const i0 = meshData.indices[i * 3 + edge];
+        const i1 = meshData.indices[i * 3 + ((edge + 1) % 3)];
+        positions.push(
+          meshData.positions[i0 * 3],
+          meshData.positions[i0 * 3 + 1],
+          meshData.positions[i0 * 3 + 2],
+          meshData.positions[i1 * 3],
+          meshData.positions[i1 * 3 + 1],
+          meshData.positions[i1 * 3 + 2]
+        );
+      }
+    }
+
+    if (positions.length === 0) return null;
+
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute(
+      "position",
+      new THREE.BufferAttribute(new Float32Array(positions), 3)
+    );
+    return geo;
+  }, [meshData, faceIndex]);
+
+  if (!geometry) return null;
+
+  return (
+    <lineSegments geometry={geometry} renderOrder={2}>
+      <lineBasicMaterial color={color} linewidth={1} transparent opacity={0.6} />
+    </lineSegments>
+  );
+}
+
 export const ModelMesh = memo(function ModelMesh({ meshData, wireframe = false }: ModelMeshProps) {
   const mode = useEditorStore(selectMode);
   const selectedFaceIndex = useEditorStore(selectSelectedFaceIndex);
@@ -192,24 +244,40 @@ export const ModelMesh = memo(function ModelMesh({ meshData, wireframe = false }
         />
       </mesh>
 
+      {/* Hover highlight: semi-transparent blue overlay */}
       {mode === "select-face" &&
         hoveredFaceIndex !== null &&
         hoveredFaceIndex !== selectedFaceIndex && (
-          <FaceHighlight
-            meshData={meshData}
-            faceIndex={hoveredFaceIndex}
-            color="#88bbff"
-            opacity={0.3}
-          />
+          <>
+            <FaceHighlight
+              meshData={meshData}
+              faceIndex={hoveredFaceIndex}
+              color="#88bbff"
+              opacity={0.3}
+            />
+            <EdgeHighlight
+              meshData={meshData}
+              faceIndex={hoveredFaceIndex}
+              color="#88bbff"
+            />
+          </>
         )}
 
+      {/* Selection highlight: brighter blue */}
       {selectedFaceIndex !== null && (
-        <FaceHighlight
-          meshData={meshData}
-          faceIndex={selectedFaceIndex}
-          color="#44aaff"
-          opacity={0.5}
-        />
+        <>
+          <FaceHighlight
+            meshData={meshData}
+            faceIndex={selectedFaceIndex}
+            color="#44aaff"
+            opacity={0.5}
+          />
+          <EdgeHighlight
+            meshData={meshData}
+            faceIndex={selectedFaceIndex}
+            color="#66ccff"
+          />
+        </>
       )}
     </group>
   );

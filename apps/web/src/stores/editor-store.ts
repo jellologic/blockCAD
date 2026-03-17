@@ -141,6 +141,7 @@ interface EditorState {
   cameraTarget: [number, number, number] | null;
 
   // Operations
+  isProcessing: boolean;
   activeOperation: { type: FeatureKind; params: Record<string, any> } | null;
 
   // Sketch editing (non-null when mode === "sketch")
@@ -217,6 +218,10 @@ interface EditorState {
   exportGLB: () => void;
   exportSTEP: (options?: { schema?: string; author?: string; organization?: string }) => void;
 
+  // Preview
+  showPreview: boolean;
+  setShowPreview: (show: boolean) => void;
+
   // Mass properties
   massProperties: MassProperties | null;
   showMassProperties: boolean;
@@ -249,6 +254,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   wireframe: false,
   showEdges: true,
   cameraTarget: null,
+  isProcessing: false,
   activeOperation: null,
   sketchSession: null,
   sketchSolver: null,
@@ -256,6 +262,9 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   sketchHistory: [],
   sketchRedoStack: [],
   sketchUndoBatching: false,
+  showPreview: true,
+  setShowPreview: (show) => set({ showPreview: show }),
+
   massProperties: null,
   showMassProperties: false,
 

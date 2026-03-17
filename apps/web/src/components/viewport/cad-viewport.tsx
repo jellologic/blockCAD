@@ -6,6 +6,8 @@ import { useEditorStore } from "@/stores/editor-store";
 import { ModelMesh } from "./model-mesh";
 import { EdgesOverlay } from "./edges-overlay";
 import { ExtrudePreview } from "./extrude-preview";
+import { DimensionOverlay } from "./dimension-overlay";
+import { ViewCube } from "./view-cube";
 import { HeadsUpToolbar } from "@/components/editor/heads-up-toolbar";
 import { SketchOverlay } from "@/components/sketch/sketch-overlay";
 import { ConfirmationCorner } from "@/components/sketch/confirmation-corner";
@@ -165,6 +167,46 @@ function ReferencePlanes() {
   );
 }
 
+/** Welcome state shown when no geometry exists */
+function WelcomeState() {
+  const loadSample = useEditorStore((s) => s.loadSample);
+  const startSketchFlow = useEditorStore((s) => s.startSketchFlow);
+
+  return (
+    <Html center style={{ pointerEvents: "auto" }}>
+      <div className="text-center select-none max-w-[320px]">
+        <p className="text-white/60 text-sm mb-3">No geometry to display</p>
+
+        <div className="flex gap-2 justify-center mb-4">
+          <button
+            onClick={startSketchFlow}
+            className="rounded bg-[var(--cad-accent)] px-3 py-1.5 text-xs font-medium text-white hover:brightness-110 transition"
+          >
+            New Sketch (S)
+          </button>
+          <button
+            onClick={() => loadSample("simple-box")}
+            className="rounded bg-white/10 px-3 py-1.5 text-xs text-white/80 hover:bg-white/20 transition"
+          >
+            Try a Sample
+          </button>
+        </div>
+
+        <div className="text-left bg-white/5 rounded-lg p-3 text-[11px] text-white/50 space-y-1.5">
+          <p className="text-white/70 font-medium mb-1">Quick Start</p>
+          <p>1. Press <kbd className="bg-white/10 rounded px-1">S</kbd> to start a sketch on a plane</p>
+          <p>2. Draw shapes with <kbd className="bg-white/10 rounded px-1">L</kbd>ine, <kbd className="bg-white/10 rounded px-1">R</kbd>ect, or <kbd className="bg-white/10 rounded px-1">C</kbd>ircle</p>
+          <p>3. Press <kbd className="bg-white/10 rounded px-1">E</kbd> to extrude into 3D</p>
+        </div>
+
+        <p className="mt-3 text-[10px] text-white/30">
+          Ctrl+Shift+P for command palette
+        </p>
+      </div>
+    </Html>
+  );
+}
+
 export function CadViewport() {
   const meshData = useEditorStore((s) => s.meshData);
   const wireframe = useEditorStore((s) => s.wireframe);
@@ -173,15 +215,18 @@ export function CadViewport() {
   const isProcessing = useEditorStore((s) => s.isProcessing);
   const sketchEntityCount = useEditorStore((s) => s.sketchSession?.entities.length ?? 0);
   const activeOperation = useEditorStore((s) => s.activeOperation);
+  const showPreview = useEditorStore((s) => s.showPreview);
+  const selectedFeatureId = useEditorStore((s) => s.selectedFeatureId);
   const hasMesh = meshData && meshData.vertexCount > 0;
 
   return (
     <div className="relative h-full w-full" data-testid="viewport">
       <HeadsUpToolbar />
       <ConfirmationCorner />
+      <ViewCube />
       {isProcessing && (
         <div
-          className="absolute top-2 right-2 z-10 flex items-center gap-2 rounded bg-black/60 px-3 py-1.5 text-xs text-white/80"
+          className="absolute top-2 left-1/2 -translate-x-1/2 z-10 flex items-center gap-2 rounded bg-black/60 px-3 py-1.5 text-xs text-white/80"
           data-testid="processing-indicator"
         >
           <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-white/30 border-t-white/80" />
@@ -199,17 +244,14 @@ export function CadViewport() {
         {hasMesh && <ModelMesh meshData={meshData} wireframe={wireframe} />}
         {hasMesh && showEdges && !wireframe && <EdgesOverlay meshData={meshData} />}
 
-        {(activeOperation?.type === "extrude" || activeOperation?.type === "cut_extrude") && <ExtrudePreview />}
+        {showPreview && (activeOperation?.type === "extrude" || activeOperation?.type === "cut_extrude") && <ExtrudePreview />}
 
-        {/* Instructional text overlays */}
-        {!hasMesh && mode === "view" && (
-          <Html center style={{ pointerEvents: "none" }}>
-            <div className="text-center select-none">
-              <p className="text-white/60 text-sm mb-1">No geometry to display</p>
-              <p className="text-white/40 text-xs">Click <strong className="text-white/70">Sketch</strong> or press <strong className="text-white/70">S</strong> to begin</p>
-            </div>
-          </Html>
-        )}
+        {/* Dimension annotations when a feature is selected */}
+        {hasMesh && selectedFeatureId && <DimensionOverlay meshData={meshData} />}
+
+        {/* Welcome / empty state */}
+        {!hasMesh && mode === "view" && !activeOperation && <WelcomeState />}
+
         {mode === "select-plane" && (
           <Html center style={{ pointerEvents: "none" }}>
             <div className="text-center select-none">

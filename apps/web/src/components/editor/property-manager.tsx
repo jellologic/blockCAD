@@ -1,4 +1,4 @@
-import { Check, X } from "lucide-react";
+import { Check, X, Eye, EyeOff } from "lucide-react";
 import { useEditorStore } from "@/stores/editor-store";
 import { ExtrudePanel } from "./extrude-panel";
 import { RevolvePanel } from "./revolve-panel";
@@ -18,10 +18,28 @@ import { LoftPanel } from "./loft-panel";
 import { DomePanel } from "./dome-panel";
 import { RibPanel } from "./rib-panel";
 
+function CollapsibleSection({ title, children, defaultOpen = true }: { title: string; children: React.ReactNode; defaultOpen?: boolean }) {
+  return (
+    <details open={defaultOpen} className="group">
+      <summary className="flex items-center gap-1.5 cursor-pointer select-none py-1.5 text-[10px] font-semibold uppercase tracking-wider text-[var(--cad-text-muted)] hover:text-[var(--cad-text-primary)] transition-colors">
+        <span className="inline-block transition-transform group-open:rotate-90">▶</span>
+        {title}
+      </summary>
+      <div className="pb-2">
+        {children}
+      </div>
+    </details>
+  );
+}
+
+export { CollapsibleSection };
+
 export function PropertyManager() {
   const activeOperation = useEditorStore((s) => s.activeOperation);
   const confirmOperation = useEditorStore((s) => s.confirmOperation);
   const cancelOperation = useEditorStore((s) => s.cancelOperation);
+  const showPreview = useEditorStore((s) => s.showPreview);
+  const setShowPreview = useEditorStore((s) => s.setShowPreview);
 
   if (!activeOperation) return null;
 
@@ -49,12 +67,27 @@ export function PropertyManager() {
   const title = displayNames[activeOperation.type] ??
     activeOperation.type.charAt(0).toUpperCase() + activeOperation.type.slice(1);
 
+  const hasPreview = activeOperation.type === "extrude" || activeOperation.type === "cut_extrude";
+
   return (
     <div className="flex h-full flex-col bg-[var(--cad-bg-panel-alt)] border-r border-[var(--cad-border)]">
-      {/* Title bar with confirm/cancel */}
+      {/* Title bar with preview toggle + confirm/cancel */}
       <div className="flex items-center justify-between border-b border-[var(--cad-border)] px-3 py-2">
         <span className="text-sm font-medium text-[var(--cad-text-primary)]">{title}</span>
         <div className="flex items-center gap-1">
+          {hasPreview && (
+            <button
+              onClick={() => setShowPreview(!showPreview)}
+              className={`rounded p-1 transition-colors ${
+                showPreview
+                  ? "text-[var(--cad-accent)] hover:bg-[var(--cad-accent)]/20"
+                  : "text-[var(--cad-text-muted)] hover:bg-white/10"
+              }`}
+              title={showPreview ? "Hide Preview" : "Show Preview"}
+            >
+              {showPreview ? <Eye size={16} /> : <EyeOff size={16} />}
+            </button>
+          )}
           <button
             onClick={confirmOperation}
             data-testid="operation-confirm"

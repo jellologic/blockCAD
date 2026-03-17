@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { StepExportDialog } from "@/components/step-export-dialog";
 import { MassPropertiesPanel } from "@/components/mass-properties-panel";
+import { SampleModelsDropdown } from "./sample-models";
 import { RibbonButton } from "./ribbon-button";
 import { useEditorStore } from "@/stores/editor-store";
 import { useAssemblyStore } from "@/stores/assembly-store";
@@ -190,6 +191,9 @@ export function CommandManager() {
                   <RibbonButton icon={Move} label="Move/Copy" size="small" testId="ribbon-move-copy" onClick={() => startOperation("move_copy")} />
                   <RibbonButton icon={Scaling} label="Scale" size="small" testId="ribbon-scale" onClick={() => startOperation("scale")} />
                 </div>
+              </RibbonGroup>
+              <RibbonGroup label="Samples">
+                <SampleModelsDropdown />
               </RibbonGroup>
             </>
           )}
