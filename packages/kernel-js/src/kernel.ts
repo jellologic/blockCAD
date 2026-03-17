@@ -235,6 +235,18 @@ export class KernelClient {
     }
   }
 
+  /** Return raw tessellation bytes without parsing (for transfer to main thread). */
+  tessellateRaw(chordTolerance: number = 0.01, angleTolerance: number = 0.5): Uint8Array {
+    try {
+      const bytes = this.handle.tessellate(chordTolerance, angleTolerance);
+      const copy = new Uint8Array(bytes.byteLength);
+      copy.set(bytes);
+      return copy;
+    } catch (err) {
+      throw KernelError.fromWasm(String(err));
+    }
+  }
+
   get featureList(): FeatureEntry[] {
     try {
       return JSON.parse(this.handle.get_features_json());

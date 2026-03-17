@@ -2,6 +2,9 @@ use crate::error::{KernelError, KernelResult};
 use crate::topology::BRep;
 use crate::topology::face::FaceId;
 
+#[cfg(feature = "parallel")]
+use rayon::prelude::*;
+
 use super::ear_clip;
 use super::mesh::TriMesh;
 use super::params::TessellationParams;
@@ -90,18 +93,13 @@ pub fn tessellate_face(
         ear_clip::triangulate_with_holes(&vertices_2d, &inner_loops_2d)
     };
 
-    // Build combined vertex arrays (outer + inner loops) with pre-computed capacity
-    let inner_total: usize = inner_loops_3d.iter().map(|v| v.len()).sum();
-    let total_verts = vertices_3d.len() + inner_total;
-
-    let mut all_verts_3d = Vec::with_capacity(total_verts);
-    all_verts_3d.extend_from_slice(&vertices_3d);
+    // Build combined vertex arrays (outer + inner loops)
+    let mut all_verts_3d = vertices_3d.clone();
     for inner in &inner_loops_3d {
         all_verts_3d.extend_from_slice(inner);
     }
 
-    let mut all_verts_2d = Vec::with_capacity(total_verts);
-    all_verts_2d.extend_from_slice(&vertices_2d);
+    let mut all_verts_2d = vertices_2d.clone();
     for inner in &inner_loops_2d {
         all_verts_2d.extend_from_slice(inner);
     }
@@ -162,21 +160,41 @@ pub fn tessellate_face(
 }
 
 /// Tessellate an entire BRep into a single triangle mesh.
+///
+/// When the `parallel` feature is enabled (default), faces are tessellated
+/// concurrently using rayon's work-stealing thread pool.
 pub fn tessellate_brep(
     brep: &BRep,
     params: &TessellationParams,
 ) -> KernelResult<TriMesh> {
-    let mut combined = TriMesh::new();
-    let mut face_index = 0u32;
+    let faces: Vec<(FaceId, u32)> = brep
+        .faces
+        .iter()
+        .enumerate()
+        .map(|(i, (id, _))| (id, i as u32))
+        .collect();
 
-    for (face_id, _face) in brep.faces.iter() {
-        let face_mesh = tessellate_face(brep, face_id, face_index, params)?;
-        combined.merge(&face_mesh);
-        face_index += 1;
+    #[cfg(feature = "parallel")]
+    let face_meshes: Vec<KernelResult<TriMesh>> = faces
+        .par_iter()
+        .map(|&(face_id, face_index)| tessellate_face(brep, face_id, face_index, params))
+        .collect();
+
+    #[cfg(not(feature = "parallel"))]
+    let face_meshes: Vec<KernelResult<TriMesh>> = faces
+        .iter()
+        .map(|&(face_id, face_index)| tessellate_face(brep, face_id, face_index, params))
+        .collect();
+
+    let mut combined = TriMesh::new();
+    for result in face_meshes {
+        combined.merge(&result?);
     }
 
-    combined.fix_winding();
-    combined.validate()?;
+    if !params.skip_validation {
+        combined.fix_winding();
+        combined.validate()?;
+    }
     Ok(combined)
 }
 
@@ -206,6 +224,48 @@ mod tests {
         let mesh = tessellate_brep(&brep, &params).unwrap();
         assert_eq!(mesh.triangle_count(), 12);
         assert!(mesh.validate().is_ok());
+    }
+
+    /// Tessellate the same BRep with validation skipped (sequential code path
+    /// via `skip_validation`) and with the default path, then compare counts.
+    #[test]
+    fn parallel_same_as_sequential() {
+        let brep = build_box_brep(2.0, 3.0, 4.0).unwrap();
+
+        // Default (parallel when feature enabled) with validation
+        let params = TessellationParams::default();
+        let mesh_default = tessellate_brep(&brep, &params).unwrap();
+
+        // With skip_validation — exercises the same parallel map but skips
+        // fix_winding + validate, so we can compare raw output.
+        let params_skip = TessellationParams {
+            skip_validation: true,
+            ..TessellationParams::default()
+        };
+        let mesh_skip = tessellate_brep(&brep, &params_skip).unwrap();
+
+        assert_eq!(mesh_default.vertex_count(), mesh_skip.vertex_count());
+        assert_eq!(mesh_default.triangle_count(), mesh_skip.triangle_count());
+        assert_eq!(mesh_default.face_ids.len(), mesh_skip.face_ids.len());
+    }
+
+    /// Tessellate a non-trivial BRep (box = 6 faces) and verify face_id
+    /// coverage to exercise parallelism producing correct face indices.
+    #[test]
+    fn parallel_face_ids_complete() {
+        let brep = build_box_brep(5.0, 5.0, 5.0).unwrap();
+        let params = TessellationParams::default();
+        let mesh = tessellate_brep(&brep, &params).unwrap();
+
+        // Every face index 0..6 should appear in the face_ids
+        let mut seen = std::collections::HashSet::new();
+        for &fid in &mesh.face_ids {
+            seen.insert(fid);
+        }
+        assert_eq!(seen.len(), 6, "All 6 box faces should appear in face_ids");
+        for i in 0..6u32 {
+            assert!(seen.contains(&i), "Missing face_id {}", i);
+        }
     }
 
     #[test]

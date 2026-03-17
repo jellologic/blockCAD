@@ -9,15 +9,15 @@ import type {
   SketchEntity2D,
   SketchConstraint2D,
   SketchPoint2D,
+  FeatureParams,
 } from "@blockCAD/kernel";
 import {
-  initKernel,
-  KernelClient,
   SketchClient,
   FRONT_PLANE,
   TOP_PLANE,
   RIGHT_PLANE,
 } from "@blockCAD/kernel";
+import { KernelProxy } from "@/lib/kernel-proxy";
 import { toast } from "sonner";
 
 type EditorMode = "view" | "sketch" | "select-face" | "select-edge" | "select-plane";
@@ -112,10 +112,11 @@ function mirrorConstraintToSolver(solver: SketchClient, constraint: SketchConstr
 
 interface EditorState {
   // Kernel state
-  kernel: KernelClient | null;
+  kernel: KernelProxy | null;
   meshData: MeshData | null;
   features: FeatureEntry[];
   isLoading: boolean;
+  isProcessing: boolean;
   error: Error | null;
 
   // Editor mode
@@ -147,20 +148,20 @@ interface EditorState {
 
   // Actions
   initKernel: () => Promise<void>;
-  addFeature: (kind: string, name: string, params: any) => void;
+  addFeature: (kind: string, name: string, params: any) => Promise<void>;
   selectFeature: (id: string | null) => void;
   selectFace: (index: number | null) => void;
   hoverFace: (index: number | null) => void;
   setMode: (mode: EditorMode) => void;
   toggleWireframe: () => void;
   toggleEdges: () => void;
-  rebuild: () => void;
+  rebuild: () => Promise<void>;
   startOperation: (type: FeatureKind) => void;
   updateOperationParams: (params: Record<string, any>) => void;
-  confirmOperation: () => void;
+  confirmOperation: () => Promise<void>;
   cancelOperation: () => void;
-  suppressFeature: (index: number) => void;
-  unsuppressFeature: (index: number) => void;
+  suppressFeature: (index: number) => Promise<void>;
+  unsuppressFeature: (index: number) => Promise<void>;
 
   // Camera actions
   setCameraTarget: (position: [number, number, number] | null) => void;
@@ -195,16 +196,16 @@ interface EditorState {
   setMeasureResult: (result: MeasureResult | null) => void;
 
   // Export actions
-  exportSTL: (binary?: boolean) => void;
-  exportOBJ: () => void;
-  export3MF: () => void;
-  exportGLB: () => void;
-  exportSTEP: (options?: { schema?: string; author?: string; organization?: string }) => void;
+  exportSTL: (binary?: boolean) => Promise<void>;
+  exportOBJ: () => Promise<void>;
+  export3MF: () => Promise<void>;
+  exportGLB: () => Promise<void>;
+  exportSTEP: (options?: { schema?: string; author?: string; organization?: string }) => Promise<void>;
 
   // Mass properties
   massProperties: MassProperties | null;
   showMassProperties: boolean;
-  computeMassProperties: () => void;
+  computeMassProperties: () => Promise<void>;
   setShowMassProperties: (show: boolean) => void;
 }
 
@@ -224,6 +225,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   meshData: null,
   features: [],
   isLoading: true,
+  isProcessing: false,
   error: null,
   mode: "view" as EditorMode,
   selectedFeatureId: null,
@@ -245,10 +247,10 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
   initKernel: async () => {
     try {
-      await initKernel();
-      const client = new KernelClient();
+      const proxy = new KernelProxy();
+      await proxy.init();
       set({
-        kernel: client,
+        kernel: proxy,
         meshData: null,
         features: [],
         isLoading: false,
@@ -261,18 +263,19 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     }
   },
 
-  addFeature: (kind, name, params) => {
+  addFeature: async (kind, name, params) => {
     const { kernel } = get();
     if (!kernel) return;
-    kernel.addFeature(kind, name, params);
+    set({ isProcessing: true });
     try {
-      const mesh = kernel.tessellate();
+      const result = await kernel.addFeature(kind, name, params);
       set({
-        meshData: mesh,
-        features: kernel.featureList,
+        meshData: result.meshData ?? get().meshData,
+        features: result.features ?? get().features,
+        isProcessing: false,
       });
     } catch {
-      set({ features: kernel.featureList });
+      set({ isProcessing: false });
     }
   },
 
@@ -373,17 +376,19 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     }
   },
 
-  rebuild: () => {
+  rebuild: async () => {
     const { kernel } = get();
     if (!kernel) return;
+    set({ isProcessing: true });
     try {
-      const mesh = kernel.tessellate();
+      const result = await kernel.tessellate();
       set({
-        meshData: mesh,
-        features: kernel.featureList,
+        meshData: result.meshData,
+        features: result.features,
+        isProcessing: false,
       });
     } catch {
-      set({ features: kernel.featureList });
+      set({ isProcessing: false });
     }
   },
 
@@ -557,32 +562,22 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     set({ activeOperation: { type, params: defaultParams[type] || {} } });
   },
 
-  updateOperationParams: (() => {
-    let rafId: number | null = null;
-    let pendingParams: Record<string, any> = {};
-    return (params: Record<string, any>) => {
-      pendingParams = { ...pendingParams, ...params };
-      if (rafId !== null) cancelAnimationFrame(rafId);
-      rafId = requestAnimationFrame(() => {
-        const { activeOperation } = get();
-        if (!activeOperation) { pendingParams = {}; rafId = null; return; }
-        set({
-          activeOperation: {
-            ...activeOperation,
-            params: { ...activeOperation.params, ...pendingParams },
-          },
-        });
-        pendingParams = {};
-        rafId = null;
-      });
-    };
-  })(),
+  updateOperationParams: (params) => {
+    const { activeOperation } = get();
+    if (!activeOperation) return;
+    set({
+      activeOperation: {
+        ...activeOperation,
+        params: { ...activeOperation.params, ...params },
+      },
+    });
+  },
 
   confirmOperation: async () => {
     const { kernel, activeOperation, features: localFeatures } = get();
     if (!kernel || !activeOperation) return;
 
-    // For extrude/cut_extrude/revolve/cut_revolve: use a fresh kernel to avoid WASM borrow conflicts
+    // For complex operations: replay all features on a fresh kernel in the worker to avoid WASM borrow conflicts
     if (activeOperation.type === "extrude" || activeOperation.type === "cut_extrude" || activeOperation.type === "revolve" || activeOperation.type === "cut_revolve" || activeOperation.type === "fillet" || activeOperation.type === "variable_fillet" || activeOperation.type === "face_fillet" || activeOperation.type === "chamfer" || activeOperation.type === "linear_pattern" || activeOperation.type === "circular_pattern" || activeOperation.type === "mirror" || activeOperation.type === "shell" || activeOperation.type === "hole_wizard" || activeOperation.type === "move_copy" || activeOperation.type === "scale" || activeOperation.type === "sweep" || activeOperation.type === "loft" || activeOperation.type === "dome" || activeOperation.type === "rib") {
       const hasSketch = localFeatures.some((f) => f.type === "sketch" && f.params.type === "sketch");
       if (!hasSketch) {
@@ -613,13 +608,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         rib: "Rib",
       }[activeOperation.type] || "Feature";
 
-      // Create a fresh KernelClient to avoid "recursive use" wasm-bindgen error
-      const freshKernel = new KernelClient();
+      set({ isProcessing: true });
       try {
-        // Replay all existing features (sketches, extrudes, etc.)
-        for (const feat of localFeatures) {
-          freshKernel.addFeature(feat.type, feat.name, feat.params);
-        }
         // Strip internal UI-only params (prefixed with _) and convert draft angle to radians
         const { _draftEnabled, _draftOutward, _lastDraftAngle, _draftEnabled2, _draftOutward2, _lastDraftAngle2, _fromOffset, ...kernelParams } = activeOperation.params as any;
         const finalParams = {
@@ -627,17 +617,17 @@ export const useEditorStore = create<EditorState>((set, get) => ({
           draft_angle: (kernelParams.draft_angle ?? 0) * (Math.PI / 180),
           draft_angle2: (kernelParams.draft_angle2 ?? 0) * (Math.PI / 180),
         };
-        freshKernel.addFeature(
+        const result = await kernel.replayAndAdd(
+          localFeatures.map((f) => ({ type: f.type, name: f.name, params: f.params })),
           activeOperation.type,
           featureName,
-          { type: activeOperation.type, params: finalParams } as any
+          { type: activeOperation.type, params: finalParams } as FeatureParams,
         );
-        const mesh = freshKernel.tessellate();
         set({
-          kernel: freshKernel,
           activeOperation: null,
-          meshData: mesh,
-          features: freshKernel.featureList,
+          meshData: result.meshData,
+          features: result.features,
+          isProcessing: false,
         });
         toast.success(`${featureName} applied`);
         if (activeOperation.type === "cut_revolve") {
@@ -652,60 +642,63 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         } else {
           toast.error(`${featureName} failed: ` + msg);
         }
-        set({ activeOperation: null });
+        set({ activeOperation: null, isProcessing: false });
         return;
       }
     }
 
-    // Non-extrude operations
+    // Non-complex operations
+    set({ isProcessing: true });
     try {
-      kernel.addFeature(
+      const result = await kernel.addFeature(
         activeOperation.type,
         activeOperation.type.charAt(0).toUpperCase() + activeOperation.type.slice(1),
-        { type: activeOperation.type, params: activeOperation.params } as any
+        { type: activeOperation.type, params: activeOperation.params } as FeatureParams,
       );
+      set({
+        activeOperation: null,
+        meshData: result.meshData ?? get().meshData,
+        features: result.features ?? get().features,
+        isProcessing: false,
+      });
     } catch (err) {
       console.warn("[blockCAD] Operation failed:", err);
       toast.error(`${activeOperation.type} failed`);
-      set({ activeOperation: null });
-      return;
-    }
-
-    try {
-      const mesh = kernel.tessellate();
-      set({
-        activeOperation: null,
-        meshData: mesh,
-        features: kernel.featureList,
-      });
-    } catch {
-      set({ activeOperation: null });
+      set({ activeOperation: null, isProcessing: false });
     }
   },
 
   cancelOperation: () => set({ activeOperation: null }),
 
-  suppressFeature: (index) => {
+  suppressFeature: async (index) => {
     const { kernel } = get();
     if (!kernel) return;
-    kernel.suppressFeature(index);
+    set({ isProcessing: true });
     try {
-      const mesh = kernel.tessellate();
-      set({ meshData: mesh, features: kernel.featureList });
+      const result = await kernel.suppress(index);
+      set({
+        meshData: result.meshData ?? get().meshData,
+        features: result.features ?? get().features,
+        isProcessing: false,
+      });
     } catch {
-      set({ features: kernel.featureList });
+      set({ isProcessing: false });
     }
   },
 
-  unsuppressFeature: (index) => {
+  unsuppressFeature: async (index) => {
     const { kernel } = get();
     if (!kernel) return;
-    kernel.unsuppressFeature(index);
+    set({ isProcessing: true });
     try {
-      const mesh = kernel.tessellate();
-      set({ meshData: mesh, features: kernel.featureList });
+      const result = await kernel.unsuppress(index);
+      set({
+        meshData: result.meshData ?? get().meshData,
+        features: result.features ?? get().features,
+        isProcessing: false,
+      });
     } catch {
-      set({ features: kernel.featureList });
+      set({ isProcessing: false });
     }
   },
 
@@ -1079,79 +1072,96 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     });
   },
 
-  exportSTL: (binary = true) => {
+  exportSTL: async (binary = true) => {
     const { kernel } = get();
     if (!kernel) { toast.error("No model loaded"); return; }
     try {
+      set({ isProcessing: true });
+      const result = await kernel.exportSTL(binary);
       if (binary) {
-        const bytes = kernel.exportSTLBinary();
-        downloadFile(bytes, "model.stl", "application/sla");
+        downloadFile(new Uint8Array(result as ArrayBuffer), "model.stl", "application/sla");
       } else {
-        const text = kernel.exportSTLAscii({});
-        downloadFile(text, "model.stl", "text/plain");
+        downloadFile(result as string, "model.stl", "text/plain");
       }
       toast.success("STL exported");
     } catch (err) {
       toast.error("Export failed: " + (err instanceof Error ? err.message : String(err)));
+    } finally {
+      set({ isProcessing: false });
     }
   },
 
-  exportOBJ: () => {
+  exportOBJ: async () => {
     const { kernel } = get();
     if (!kernel) { toast.error("No model loaded"); return; }
     try {
-      const text = kernel.exportOBJ({});
+      set({ isProcessing: true });
+      const text = await kernel.exportOBJ({});
       downloadFile(text, "model.obj", "text/plain");
       toast.success("OBJ exported");
     } catch (err) {
       toast.error("Export failed: " + (err instanceof Error ? err.message : String(err)));
+    } finally {
+      set({ isProcessing: false });
     }
   },
 
-  export3MF: () => {
+  export3MF: async () => {
     const { kernel } = get();
     if (!kernel) { toast.error("No model loaded"); return; }
     try {
-      const bytes = kernel.export3MF({});
-      downloadFile(bytes, "model.3mf", "application/vnd.ms-package.3dmanufacturing-3dmodel+xml");
+      set({ isProcessing: true });
+      const buf = await kernel.export3MF({});
+      downloadFile(new Uint8Array(buf), "model.3mf", "application/vnd.ms-package.3dmanufacturing-3dmodel+xml");
       toast.success("3MF exported");
     } catch (err) {
       toast.error("Export failed: " + (err instanceof Error ? err.message : String(err)));
+    } finally {
+      set({ isProcessing: false });
     }
   },
 
-  exportGLB: () => {
+  exportGLB: async () => {
     const { kernel } = get();
     if (!kernel) { toast.error("No model loaded"); return; }
     try {
-      const bytes = kernel.exportGLB({});
-      downloadFile(bytes, "model.glb", "model/gltf-binary");
+      set({ isProcessing: true });
+      const buf = await kernel.exportGLB({});
+      downloadFile(new Uint8Array(buf), "model.glb", "model/gltf-binary");
       toast.success("GLB exported");
     } catch (err) {
       toast.error("Export failed: " + (err instanceof Error ? err.message : String(err)));
+    } finally {
+      set({ isProcessing: false });
     }
   },
 
-  exportSTEP: (options = {}) => {
+  exportSTEP: async (options = {}) => {
     const { kernel } = get();
     if (!kernel) { toast.error("No model loaded"); return; }
     try {
-      const text = kernel.exportSTEP(options);
+      set({ isProcessing: true });
+      const text = await kernel.exportSTEP(options);
       downloadFile(text, "model.step", "application/step");
       toast.success("STEP exported");
     } catch (err) {
       toast.error("Export failed: " + (err instanceof Error ? err.message : String(err)));
+    } finally {
+      set({ isProcessing: false });
     }
   },
 
-  computeMassProperties: () => {
+  computeMassProperties: async () => {
     const { kernel } = get();
     if (!kernel) { toast.error("No model loaded"); return; }
     try {
-      const props = kernel.massProperties();
+      set({ isProcessing: true });
+      const props = await kernel.computeMassProperties();
       set({ massProperties: props });
     } catch (err) {
       toast.error("Mass properties failed: " + (err instanceof Error ? err.message : String(err)));
+    } finally {
+      set({ isProcessing: false });
     }
   },
 
