@@ -4,15 +4,64 @@ import type { FeatureParams } from "./types";
 import { KernelError } from "./errors";
 import { transformFeatureParams } from "./kernel";
 
+/** A lightweight sub-assembly grouping (frontend-only). */
+export interface SubAssembly {
+  name: string;
+  /** Component IDs that belong to this sub-assembly. */
+  componentIds: string[];
+}
+
+/** Per-component mesh data with face IDs for picking. */
+export interface PerComponentMesh {
+  componentId: string;
+  componentIndex: number;
+  positions: Float64Array;
+  normals: Float64Array;
+  indices: Uint32Array;
+  faceIds: Uint32Array;
+}
+
+/** A single frame of a motion study. */
+export interface MotionFrame {
+  step: number;
+  driverValue: number;
+  mesh: MeshData;
+}
+
 /**
  * High-level TypeScript client for assembly operations.
  * Wraps the WASM AssemblyHandle.
  */
 export class AssemblyClient {
   private handle: AssemblyHandle;
+  /** Frontend-only sub-assembly groupings. */
+  private _subAssemblies: SubAssembly[] = [];
 
   constructor() {
     this.handle = new AssemblyHandle();
+  }
+
+  /** Create a named sub-assembly group. Returns its index. */
+  addSubAssembly(name: string): number {
+    const idx = this._subAssemblies.length;
+    this._subAssemblies.push({ name, componentIds: [] });
+    return idx;
+  }
+
+  /** Insert a component and associate it with a sub-assembly. */
+  insertComponentInSubAssembly(subIdx: number, partId: string, name: string, transform?: number[]): string {
+    const sub = this._subAssemblies[subIdx];
+    if (!sub) {
+      throw new KernelError("not_found", `Sub-assembly index ${subIdx} out of bounds`);
+    }
+    const compId = this.addComponent(partId, name, transform);
+    sub.componentIds.push(compId);
+    return compId;
+  }
+
+  /** Get the list of sub-assemblies (read-only snapshot). */
+  get subAssemblies(): ReadonlyArray<Readonly<SubAssembly>> {
+    return this._subAssemblies;
   }
 
   /** Add a new part to the assembly. Returns the part ID. */
@@ -55,6 +104,35 @@ export class AssemblyClient {
         ...mate,
         suppressed: mate.suppressed ?? false,
       }));
+    } catch (err) {
+      throw KernelError.fromWasm(String(err));
+    }
+  }
+
+  /** Update an existing mate. Only provided fields are changed. */
+  updateMate(mateId: string, update: Record<string, unknown>): void {
+    try {
+      this.handle.update_mate(mateId, JSON.stringify(update));
+    } catch (err) {
+      throw KernelError.fromWasm(String(err));
+    }
+  }
+
+  /** Remove a mate by ID. */
+  removeMate(mateId: string): void {
+    try {
+      this.handle.remove_mate(mateId);
+    } catch (err) {
+      throw KernelError.fromWasm(String(err));
+    }
+  }
+
+  /** Get a mate by ID. Returns null if not found. */
+  getMate(mateId: string): unknown | null {
+    try {
+      const result = this.handle.get_mate(mateId);
+      if (result === null || result === undefined) return null;
+      return JSON.parse(result as string);
     } catch (err) {
       throw KernelError.fromWasm(String(err));
     }
@@ -189,6 +267,124 @@ export class AssemblyClient {
     } catch (err) {
       throw KernelError.fromWasm(String(err));
     }
+  }
+
+  /** Tessellate each component separately, returning per-component mesh data with face IDs for picking. */
+  tessellatePerComponent(chordTolerance: number = 0.01, angleTolerance: number = 0.5): PerComponentMesh[] {
+    try {
+      const jsonStr = this.handle.tessellate_per_component(chordTolerance, angleTolerance) as string;
+      const raw: Array<{
+        component_id: string;
+        component_index: number;
+        positions: number[];
+        normals: number[];
+        indices: number[];
+        face_ids: number[];
+      }> = JSON.parse(jsonStr);
+
+      return raw.map((entry) => ({
+        componentId: entry.component_id,
+        componentIndex: entry.component_index,
+        positions: new Float64Array(entry.positions),
+        normals: new Float64Array(entry.normals),
+        indices: new Uint32Array(entry.indices),
+        faceIds: new Uint32Array(entry.face_ids),
+      }));
+    } catch (err) {
+      throw KernelError.fromWasm(String(err));
+    }
+  }
+
+  /** Set the transform of a component by index. Transform is a 16-element column-major 4x4 matrix. */
+  setComponentTransform(index: number, transform: number[]): void {
+    try {
+      this.handle.set_component_transform(index, JSON.stringify(transform));
+    } catch (err) {
+      throw KernelError.fromWasm(String(err));
+    }
+  }
+
+  /** Get the transform of a component by index. Returns a 16-element column-major 4x4 matrix. */
+  getComponentTransform(index: number): number[] {
+    try {
+      return JSON.parse(this.handle.get_component_transform(index));
+    } catch (err) {
+      throw KernelError.fromWasm(String(err));
+    }
+  }
+
+  /** Run a motion study on the assembly. Returns frames with tessellated meshes. */
+  runMotionStudy(params: {
+    driverMateId: string;
+    startValue: number;
+    endValue: number;
+    numSteps: number;
+  }): MotionFrame[] {
+    try {
+      const jsonStr = this.handle.run_motion_study(JSON.stringify({
+        driver_mate_id: params.driverMateId,
+        start_value: params.startValue,
+        end_value: params.endValue,
+        num_steps: params.numSteps,
+      })) as string;
+      const raw: Array<{
+        step: number;
+        driver_value: number;
+        component_transforms: Array<{ component_id: string; transform: number[] }>;
+      }> = JSON.parse(jsonStr);
+
+      // For each frame, tessellate the assembly to get the mesh
+      return raw.map((frame) => ({
+        step: frame.step,
+        driverValue: frame.driver_value,
+        mesh: this.tessellate(),
+      }));
+    } catch (err) {
+      throw KernelError.fromWasm(String(err));
+    }
+  }
+
+  /** Run detailed interference detection. Returns pairs of interfering components with contact points. */
+  checkInterference(): {
+    pairs: Array<{
+      componentA: string;
+      componentB: string;
+      overlapVolumeEstimate: number;
+      contactPoints: Array<[number, number, number]>;
+    }>;
+  } {
+    try {
+      const jsonStr = this.handle.check_interference_json() as string;
+      const raw = JSON.parse(jsonStr);
+      return {
+        pairs: raw.pairs.map((p: any) => ({
+          componentA: p.component_a,
+          componentB: p.component_b,
+          overlapVolumeEstimate: p.overlap_volume_estimate,
+          contactPoints: p.contact_points,
+        })),
+      };
+    } catch (err) {
+      throw KernelError.fromWasm(String(err));
+    }
+  }
+
+  /** Add an assembly-level feature (cut or hole across components). Returns the feature ID. */
+  addAssemblyFeature(feature: {
+    id: string;
+    kind: any;
+    affected_components: string[];
+  }): string {
+    try {
+      return this.handle.add_assembly_feature(JSON.stringify(feature));
+    } catch (err) {
+      throw KernelError.fromWasm(String(err));
+    }
+  }
+
+  /** Remove an assembly-level feature by ID. */
+  removeAssemblyFeature(featureId: string): boolean {
+    return this.handle.remove_assembly_feature(featureId);
   }
 
   /**

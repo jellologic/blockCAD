@@ -1,6 +1,6 @@
 //! Assembly document serialization — .blockcad-assembly JSON format.
 
-use crate::assembly::{Assembly, Component, Mate, Part};
+use crate::assembly::{Assembly, Component, Mate, Part, SubAssemblyRef};
 use crate::error::KernelResult;
 
 use super::feature_tree_io;
@@ -22,6 +22,12 @@ pub struct AssemblyDocument {
     /// Explosion steps for exploded views.
     #[serde(default)]
     pub explosion_steps: Vec<crate::assembly::ExplosionStep>,
+    /// Nested sub-assembly documents.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sub_assemblies: Vec<AssemblyDocument>,
+    /// Assembly-level features (cuts/holes across components).
+    #[serde(default)]
+    pub assembly_features: Vec<crate::assembly::AssemblyFeature>,
 }
 
 impl AssemblyDocument {
@@ -42,6 +48,12 @@ pub fn serialize_assembly(assembly: &Assembly, name: &str) -> KernelResult<Assem
         parts.push(doc);
     }
 
+    let mut sub_docs = Vec::new();
+    for sub_ref in &assembly.sub_assemblies {
+        let sub_name = format!("{} / {}", name, sub_ref.name);
+        sub_docs.push(serialize_assembly(&sub_ref.assembly, &sub_name)?);
+    }
+
     Ok(AssemblyDocument {
         schema_url: Some("https://blockcad.dev/schema/assembly/v1.json".into()),
         version: SCHEMA_VERSION,
@@ -50,6 +62,8 @@ pub fn serialize_assembly(assembly: &Assembly, name: &str) -> KernelResult<Assem
         components: assembly.components.clone(),
         mates: assembly.mates.clone(),
         explosion_steps: assembly.explosion_steps.clone(),
+        sub_assemblies: sub_docs,
+        assembly_features: assembly.assembly_features.clone(),
     })
 }
 
@@ -66,12 +80,24 @@ pub fn deserialize_assembly(doc: &AssemblyDocument) -> KernelResult<Assembly> {
         });
     }
 
+    let mut sub_assemblies = Vec::new();
+    for (i, sub_doc) in doc.sub_assemblies.iter().enumerate() {
+        let sub_asm = deserialize_assembly(sub_doc)?;
+        sub_assemblies.push(SubAssemblyRef::new(
+            format!("sub-{}", i),
+            sub_doc.metadata.name.clone(),
+            sub_asm,
+        ));
+    }
+
     Ok(Assembly {
         parts,
         components: doc.components.clone(),
+        sub_assemblies,
         mates: doc.mates.clone(),
         explosion_steps: doc.explosion_steps.clone(),
         patterns: Vec::new(),
+        assembly_features: doc.assembly_features.clone(),
     })
 }
 

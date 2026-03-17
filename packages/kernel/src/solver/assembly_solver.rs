@@ -14,6 +14,15 @@ use super::newton_raphson::{solve, SolverConfig, SolverResult};
 use super::variable::Variable;
 use crate::geometry::transform;
 
+/// A driver override for motion studies: forces a component's rotation (rx) to a fixed value.
+#[derive(Debug, Clone)]
+pub struct DriverOverride {
+    /// Component whose rx should be driven.
+    pub component_id: String,
+    /// The rotation value (radians) to fix rx to.
+    pub rx_value: f64,
+}
+
 /// Solve assembly mates, updating component transforms.
 ///
 /// The first component is grounded (fixed). Remaining components are free (6 DOF each).
@@ -23,6 +32,26 @@ use crate::geometry::transform;
 pub fn solve_assembly_mates(
     assembly: &mut Assembly,
     part_breps: &HashMap<String, BRep>,
+) -> KernelResult<SolverResult> {
+    solve_assembly_mates_inner(assembly, part_breps, None)
+}
+
+/// Solve assembly mates with an optional driver override for motion studies.
+///
+/// When `driver` is provided, the specified component's rx variable is fixed to the
+/// given value instead of 0, allowing motion studies to drive rotation.
+pub fn solve_assembly_mates_driven(
+    assembly: &mut Assembly,
+    part_breps: &HashMap<String, BRep>,
+    driver: &DriverOverride,
+) -> KernelResult<SolverResult> {
+    solve_assembly_mates_inner(assembly, part_breps, Some(driver))
+}
+
+fn solve_assembly_mates_inner(
+    assembly: &mut Assembly,
+    part_breps: &HashMap<String, BRep>,
+    driver: Option<&DriverOverride>,
 ) -> KernelResult<SolverResult> {
     if assembly.components.is_empty() {
         return Ok(SolverResult { converged: true, iterations: 0, residual: 0.0 });
@@ -49,22 +78,33 @@ pub fn solve_assembly_mates(
         let is_grounded = comp.grounded || (!has_explicit_ground && !first_active_seen);
         first_active_seen = true;
 
+        // Check if this component has a driver override for its rotation
+        let driven_rx = driver
+            .filter(|d| d.component_id == comp.id)
+            .map(|d| d.rx_value);
+
         if is_grounded {
+            let rx_val = driven_rx.unwrap_or(0.0);
             let vars = ComponentVars {
                 tx: graph.variables.add(Variable::fixed(t.x)),
                 ty: graph.variables.add(Variable::fixed(t.y)),
                 tz: graph.variables.add(Variable::fixed(t.z)),
-                rx: graph.variables.add(Variable::fixed(0.0)),
+                rx: graph.variables.add(Variable::fixed(rx_val)),
                 ry: graph.variables.add(Variable::fixed(0.0)),
                 rz: graph.variables.add(Variable::fixed(0.0)),
             };
             comp_vars.insert(comp.id.clone(), vars);
         } else {
+            let rx_var = if let Some(rx_val) = driven_rx {
+                Variable::fixed(rx_val)
+            } else {
+                Variable::new(0.0)
+            };
             let vars = ComponentVars {
                 tx: graph.variables.add(Variable::new(t.x)),
                 ty: graph.variables.add(Variable::new(t.y)),
                 tz: graph.variables.add(Variable::new(t.z)),
-                rx: graph.variables.add(Variable::new(0.0)),
+                rx: graph.variables.add(rx_var),
                 ry: graph.variables.add(Variable::new(0.0)),
                 rz: graph.variables.add(Variable::new(0.0)),
             };
@@ -198,13 +238,13 @@ pub fn solve_assembly_mates(
                 )));
             }
             MateKind::RackPinion { pitch_radius } => {
-                // Couple rack translation X with pinion rotation X
-                graph.add_equation(Box::new(RackPinionEquation::new(vars_a.tx, vars_b.rx, *pitch_radius)));
+                // Rack (component_b) translates in X proportional to pinion (component_a) rotation
+                graph.add_equation(Box::new(RackPinionEquation::new(vars_b.tx, vars_a.rx, *pitch_radius)));
             }
-            MateKind::Cam { eccentricity, base_radius } => {
-                // Cam: follower ty (comp_b) = base_radius + eccentricity * cos(rx of comp_a)
+            MateKind::Cam { lift, base_radius } => {
+                // Cam: follower tz (comp_b) = base_radius + lift * sin(rx of comp_a)
                 graph.add_equation(Box::new(CamEquation::new(
-                    vars_b.ty, vars_a.rx, *eccentricity, *base_radius,
+                    vars_b.tz, vars_a.rx, *lift, *base_radius,
                 )));
             }
             MateKind::Slot { axis } => {

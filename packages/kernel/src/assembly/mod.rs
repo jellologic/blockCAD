@@ -3,16 +3,20 @@
 //! An Assembly contains Parts (each with its own FeatureTree) and
 //! Components (instances of Parts placed at specific transforms).
 
+pub mod assembly_feature;
 pub mod evaluator;
 pub mod interference;
 pub mod bom;
 pub mod mass;
+pub mod motion;
 pub mod pattern;
 
 use crate::error::{KernelError, KernelResult};
 use crate::feature_tree::FeatureTree;
 use crate::geometry::Mat4;
 use crate::geometry::transform;
+
+pub use assembly_feature::{AssemblyFeature, AssemblyFeatureKind};
 
 /// A part definition containing a parametric feature tree.
 #[derive(Debug)]
@@ -118,7 +122,7 @@ pub enum MateKind {
     Symmetric,
     // Mechanical mates (continued)
     RackPinion { pitch_radius: f64 },
-    Cam { eccentricity: f64, base_radius: f64 },
+    Cam { lift: f64, base_radius: f64 },
     Slot { axis: [f64; 3] },
     UniversalJoint,
 }
@@ -131,14 +135,64 @@ pub struct ExplosionStep {
     pub distance: f64,
 }
 
+/// A sub-assembly reference — a nested assembly placed as a component.
+#[derive(Debug)]
+pub struct SubAssemblyRef {
+    /// Component ID used to reference this sub-assembly in the parent.
+    pub component_id: String,
+    /// Display name.
+    pub name: String,
+    /// 4x4 homogeneous transform matrix (column-major) for placement in parent.
+    pub transform: [f64; 16],
+    /// The nested assembly.
+    pub assembly: Assembly,
+    /// Whether this sub-assembly instance is suppressed.
+    pub suppressed: bool,
+    /// Whether this sub-assembly instance is hidden.
+    pub hidden: bool,
+    /// Whether this sub-assembly is grounded (fixed in parent).
+    pub grounded: bool,
+}
+
+impl SubAssemblyRef {
+    pub fn new(component_id: String, name: String, assembly: Assembly) -> Self {
+        Self {
+            component_id,
+            name,
+            transform: transform::to_array(&Mat4::identity()),
+            assembly,
+            suppressed: false,
+            hidden: false,
+            grounded: false,
+        }
+    }
+
+    pub fn with_transform(mut self, matrix: Mat4) -> Self {
+        self.transform = transform::to_array(&matrix);
+        self
+    }
+
+    pub fn with_grounded(mut self, grounded: bool) -> Self {
+        self.grounded = grounded;
+        self
+    }
+
+    pub fn transform_matrix(&self) -> Mat4 {
+        transform::from_array(&self.transform)
+    }
+}
+
 /// An assembly containing parts and their positioned instances.
 #[derive(Debug)]
 pub struct Assembly {
     pub parts: Vec<Part>,
     pub components: Vec<Component>,
+    pub sub_assemblies: Vec<SubAssemblyRef>,
     pub mates: Vec<Mate>,
     pub explosion_steps: Vec<ExplosionStep>,
     pub patterns: Vec<pattern::AssemblyPattern>,
+    /// Assembly-level features (cuts/holes) applied across components after mate solving.
+    pub assembly_features: Vec<AssemblyFeature>,
 }
 
 impl Assembly {
@@ -146,9 +200,11 @@ impl Assembly {
         Self {
             parts: Vec::new(),
             components: Vec::new(),
+            sub_assemblies: Vec::new(),
             mates: Vec::new(),
             explosion_steps: Vec::new(),
             patterns: Vec::new(),
+            assembly_features: Vec::new(),
         }
     }
 
@@ -163,6 +219,13 @@ impl Assembly {
     pub fn add_component(&mut self, component: Component) -> usize {
         let idx = self.components.len();
         self.components.push(component);
+        idx
+    }
+
+    /// Add a sub-assembly reference. Returns its index.
+    pub fn add_sub_assembly(&mut self, sub: SubAssemblyRef) -> usize {
+        let idx = self.sub_assemblies.len();
+        self.sub_assemblies.push(sub);
         idx
     }
 

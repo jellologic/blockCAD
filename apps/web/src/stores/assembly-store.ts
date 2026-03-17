@@ -21,14 +21,14 @@ interface PartEntry {
   name: string;
 }
 
-interface ComponentEntry {
+export interface ComponentEntry {
   id: string;
   partId: string;
   name: string;
   suppressed: boolean;
 }
 
-interface MateEntry {
+export interface MateEntry {
   id: string;
   kind: string;
   compA: string;
@@ -71,6 +71,12 @@ interface AssemblyState {
   patterns: PatternEntry[];
   activeOp: AssemblyOp;
   isLoading: boolean;
+  // Motion study state (from agent-ab236430)
+  motionFrames: any[];
+  currentFrame: number;
+  isPlaying: boolean;
+  // Gizmo state (from agent-a8393ac5)
+  gizmoMode: "translate" | "rotate" | null;
 
   initAssembly: () => Promise<void>;
   exitAssemblyMode: () => void;
@@ -96,6 +102,15 @@ interface AssemblyState {
   startOp: (op: AssemblyOp) => void;
   cancelOp: () => void;
   confirmOp: () => void;
+  // Motion study actions
+  runMotionStudy: (driverMateId: string, startValue: number, endValue: number, numSteps: number) => void;
+  playMotion: () => void;
+  pauseMotion: () => void;
+  stopMotion: () => void;
+  setFrame: (frame: number) => void;
+  // Gizmo actions
+  moveComponent: (componentIndex: number, transform: number[]) => void;
+  getComponentTransform: (componentIndex: number) => number[] | null;
 }
 
 export const useAssemblyStore = create<AssemblyState>((set, get) => ({
@@ -111,6 +126,10 @@ export const useAssemblyStore = create<AssemblyState>((set, get) => ({
   patterns: [],
   activeOp: null,
   isLoading: false,
+  motionFrames: [],
+  currentFrame: 0,
+  isPlaying: false,
+  gizmoMode: null,
 
   initAssembly: async () => {
     set({ isLoading: true });
@@ -418,6 +437,51 @@ export const useAssemblyStore = create<AssemblyState>((set, get) => ({
       toast.success("Pattern removed");
     } catch (err) {
       toast.error("Failed to remove pattern: " + String(err));
+    }
+  },
+
+  // Motion study actions
+  runMotionStudy: (driverMateId, startValue, endValue, numSteps) => {
+    const { assembly } = get();
+    if (!assembly) return;
+    try {
+      const frames = assembly.runMotionStudy({ driverMateId, startValue, endValue, numSteps });
+      set({ motionFrames: frames, currentFrame: 0 });
+      toast.success(`Motion study: ${frames.length} frames generated`);
+    } catch (err) {
+      toast.error("Motion study failed: " + String(err));
+    }
+  },
+
+  playMotion: () => set({ isPlaying: true }),
+  pauseMotion: () => set({ isPlaying: false }),
+  stopMotion: () => set({ isPlaying: false, currentFrame: 0 }),
+  setFrame: (frame) => {
+    const { motionFrames } = get();
+    if (frame >= 0 && frame < motionFrames.length) {
+      set({ currentFrame: frame, meshData: motionFrames[frame]?.mesh ?? null });
+    }
+  },
+
+  // Gizmo actions
+  moveComponent: (componentIndex, transform) => {
+    const { assembly } = get();
+    if (!assembly || componentIndex < 0) return;
+    try {
+      assembly.setComponentTransform(componentIndex, transform);
+      get().rebuild();
+    } catch (err) {
+      toast.error("Failed to move component: " + String(err));
+    }
+  },
+
+  getComponentTransform: (componentIndex) => {
+    const { assembly } = get();
+    if (!assembly || componentIndex < 0) return null;
+    try {
+      return assembly.getComponentTransform(componentIndex);
+    } catch {
+      return null;
     }
   },
 

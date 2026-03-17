@@ -1,6 +1,6 @@
 use wasm_bindgen::prelude::*;
 
-use crate::assembly::{Assembly, Component, Part};
+use crate::assembly::{Assembly, Component, Part, SubAssemblyRef};
 use crate::feature_tree::{Feature, FeatureKind, FeatureParams, FeatureTree};
 use crate::serialization::assembly_io;
 use crate::tessellation::{tessellate_brep, TessellationParams};
@@ -71,7 +71,7 @@ impl AssemblyHandle {
         Ok(id)
     }
 
-    /// Add a component instance. `transform_json` is a JSON array of 16 f64 values (column-major 4×4).
+    /// Add a component instance. `transform_json` is a JSON array of 16 f64 values (column-major 4x4).
     pub fn add_component(
         &mut self,
         part_id: &str,
@@ -98,7 +98,6 @@ impl AssemblyHandle {
     }
 
     /// Add a mate constraint between two components.
-    /// `mate_json` is a JSON object: { kind, component_a, component_b, geometry_ref_a, geometry_ref_b }
     pub fn add_mate(&mut self, mate_json: &str) -> Result<String, JsValue> {
         let mate: crate::assembly::Mate = serde_json::from_str(mate_json)
             .map_err(|e| JsValue::from_str(&format!("Invalid mate JSON: {}", e)))?;
@@ -187,7 +186,6 @@ impl AssemblyHandle {
     }
 
     /// Evaluate the assembly and tessellate all active components.
-    /// Returns a JSON array of `{id, meshBytes}` objects.
     pub fn tessellate(
         &mut self,
         chord_tolerance: f64,
@@ -202,9 +200,6 @@ impl AssemblyHandle {
             ..TessellationParams::default()
         };
 
-        // Tessellate each component's BRep and merge into a single mesh
-        // (For Phase 0, we merge all components into one mesh for simplicity.
-        //  Phase 1+ will return per-component meshes for selection.)
         let mut merged = crate::tessellation::mesh::TriMesh::new();
         for (_, brep) in &result.components {
             let mesh = tessellate_brep(brep, &params)
@@ -298,12 +293,10 @@ impl AssemblyHandle {
             ..TessellationParams::default()
         };
 
-        // Build per-component mesh data
         let mut components: Vec<(String, crate::tessellation::mesh::TriMesh, [f64; 16])> = Vec::new();
         for (comp_id, brep) in &result.components {
             let mesh = tessellate_brep(brep, &params)
                 .map_err(|e| -> JsValue { e.into() })?;
-            // Find the component's transform
             let transform = self.assembly.components.iter()
                 .find(|c| c.id == *comp_id)
                 .map(|c| c.transform)
@@ -315,8 +308,7 @@ impl AssemblyHandle {
             .map_err(|e| -> JsValue { e.into() })
     }
 
-    /// Update an existing mate. `mate_json` is a JSON object with optional fields:
-    /// `{ kind?, geometry_ref_a?, geometry_ref_b? }`. Only provided fields are updated.
+    /// Update an existing mate.
     pub fn update_mate(&mut self, mate_id: &str, mate_json: &str) -> Result<(), JsValue> {
         #[derive(serde::Deserialize)]
         struct MateUpdate {
@@ -351,8 +343,6 @@ impl AssemblyHandle {
     }
 
     /// Add an assembly pattern (linear or circular component array).
-    /// `pattern_json` is a JSON object matching `AssemblyPattern`.
-    /// Returns JSON array of newly created component IDs.
     pub fn add_assembly_pattern(&mut self, pattern_json: &str) -> Result<JsValue, JsValue> {
         let pattern: crate::assembly::pattern::AssemblyPattern =
             serde_json::from_str(pattern_json)
@@ -371,6 +361,158 @@ impl AssemblyHandle {
     pub fn remove_assembly_pattern(&mut self, pattern_id: &str) -> Result<(), JsValue> {
         crate::assembly::pattern::remove_assembly_pattern(&mut self.assembly, pattern_id)
             .map_err(|e| -> JsValue { e.into() })
+    }
+
+    // --- Sub-assembly methods (from agent-a4f5854e) ---
+
+    /// Add a sub-assembly to this assembly. Returns the sub-assembly index.
+    pub fn add_sub_assembly(&mut self, name: &str) -> usize {
+        let sub = SubAssemblyRef::new(
+            format!("sub-{}", self.assembly.sub_assemblies.len()),
+            name.into(),
+            Assembly::new(),
+        );
+        self.assembly.add_sub_assembly(sub)
+    }
+
+    /// Get the number of sub-assemblies.
+    pub fn sub_assembly_count(&self) -> usize {
+        self.assembly.sub_assemblies.len()
+    }
+
+    // --- Face selection methods (from agent-a8ad0135) ---
+
+    /// Tessellate each component separately, returning per-component mesh data with face IDs.
+    pub fn tessellate_per_component(
+        &mut self,
+        chord_tolerance: f64,
+        angle_tolerance: f64,
+    ) -> Result<JsValue, JsValue> {
+        let result = crate::assembly::evaluator::evaluate_assembly(&mut self.assembly)
+            .map_err(|e| -> JsValue { e.into() })?;
+
+        let params = TessellationParams {
+            chord_tolerance,
+            angle_tolerance,
+            ..TessellationParams::default()
+        };
+
+        let mut components_json: Vec<serde_json::Value> = Vec::new();
+
+        for (comp_idx, (comp_id, brep)) in result.components.iter().enumerate() {
+            let mesh = tessellate_brep(brep, &params)
+                .map_err(|e| -> JsValue { e.into() })?;
+
+            let positions: Vec<f64> = mesh.positions.iter().map(|&v| v as f64).collect();
+            let normals: Vec<f64> = mesh.normals.iter().map(|&v| v as f64).collect();
+            let indices: Vec<u32> = mesh.indices.clone();
+            let face_ids: Vec<u32> = mesh.face_ids.clone();
+
+            components_json.push(serde_json::json!({
+                "component_id": comp_id,
+                "component_index": comp_idx,
+                "positions": positions,
+                "normals": normals,
+                "indices": indices,
+                "face_ids": face_ids,
+            }));
+        }
+
+        let json_str = serde_json::to_string(&components_json)
+            .map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))?;
+        Ok(JsValue::from_str(&json_str))
+    }
+
+    // --- Transform gizmo methods (from agent-a8393ac5) ---
+
+    /// Set the transform of a component by index.
+    pub fn set_component_transform(&mut self, index: usize, transform_json: &str) -> Result<(), JsValue> {
+        let comp = self.assembly.components.get_mut(index)
+            .ok_or_else(|| JsValue::from_str("Component index out of bounds"))?;
+        let arr: [f64; 16] = serde_json::from_str(transform_json)
+            .map_err(|e| JsValue::from_str(&format!("Invalid transform: {}", e)))?;
+        comp.transform = arr;
+        Ok(())
+    }
+
+    /// Get the transform of a component by index as a JSON array of 16 f64 values.
+    pub fn get_component_transform(&self, index: usize) -> Result<String, JsValue> {
+        let comp = self.assembly.components.get(index)
+            .ok_or_else(|| JsValue::from_str("Component index out of bounds"))?;
+        serde_json::to_string(&comp.transform)
+            .map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
+    }
+
+    // --- Motion study methods (from agent-a1a483f6) ---
+
+    /// Run a motion study on the assembly.
+    pub fn run_motion_study(&mut self, params_json: &str) -> Result<JsValue, JsValue> {
+        let params: crate::assembly::motion::MotionStudyParams =
+            serde_json::from_str(params_json)
+                .map_err(|e| JsValue::from_str(&format!("Invalid motion study params: {}", e)))?;
+
+        let frames =
+            crate::assembly::motion::run_motion_study(&mut self.assembly, &params)
+                .map_err(|e| -> JsValue { e.into() })?;
+
+        let json = serde_json::to_string(&frames)
+            .map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))?;
+
+        Ok(JsValue::from_str(&json))
+    }
+
+    // --- Interference detection methods (from agent-ab4b1b58) ---
+
+    /// Run detailed interference detection (triangle-level narrow-phase).
+    pub fn check_interference_json(&mut self) -> Result<JsValue, JsValue> {
+        let result = crate::assembly::evaluator::evaluate_assembly(&mut self.assembly)
+            .map_err(|e| -> JsValue { e.into() })?;
+
+        let params = TessellationParams {
+            chord_tolerance: 0.1,
+            angle_tolerance: 15.0_f64.to_radians(),
+            ..TessellationParams::default()
+        };
+
+        let mut mesh_data: Vec<(String, crate::tessellation::mesh::TriMesh, [f64; 16])> = Vec::new();
+        for (comp_id, brep) in &result.components {
+            let mesh = tessellate_brep(brep, &params)
+                .map_err(|e| -> JsValue { e.into() })?;
+            let transform = self.assembly.components.iter()
+                .find(|c| c.id == *comp_id)
+                .map(|c| c.transform)
+                .unwrap_or_else(|| crate::geometry::transform::to_array(&crate::geometry::Mat4::identity()));
+            mesh_data.push((comp_id.clone(), mesh, transform));
+        }
+
+        let components: Vec<(String, &crate::tessellation::mesh::TriMesh, [f64; 16])> = mesh_data
+            .iter()
+            .map(|(id, mesh, t)| (id.clone(), mesh, *t))
+            .collect();
+
+        let interference_result = crate::assembly::interference::check_interference_detailed(&components);
+
+        let json = serde_json::to_string(&interference_result)
+            .map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))?;
+        Ok(JsValue::from_str(&json))
+    }
+
+    // --- Assembly feature methods (from agent-a30b2054) ---
+
+    /// Add an assembly-level feature (cut or hole across components).
+    pub fn add_assembly_feature(&mut self, feature_json: &str) -> Result<String, JsValue> {
+        let feature: crate::assembly::AssemblyFeature = serde_json::from_str(feature_json)
+            .map_err(|e| JsValue::from_str(&format!("Invalid assembly feature JSON: {}", e)))?;
+        let id = feature.id.clone();
+        self.assembly.assembly_features.push(feature);
+        Ok(id)
+    }
+
+    /// Remove an assembly-level feature by ID. Returns true if found and removed.
+    pub fn remove_assembly_feature(&mut self, feature_id: &str) -> bool {
+        let before = self.assembly.assembly_features.len();
+        self.assembly.assembly_features.retain(|f| f.id != feature_id);
+        self.assembly.assembly_features.len() < before
     }
 
     pub fn part_count(&self) -> usize {

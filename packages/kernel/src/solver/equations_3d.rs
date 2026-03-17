@@ -708,37 +708,34 @@ impl Equation for RackPinionEquation {
 }
 
 // ─── CAM ────────────────────────────────────────────────────────
-// Eccentric cam: follower Y-translation varies sinusoidally with cam X-rotation.
-// ty_follower = base_radius + eccentricity * cos(rx_cam)
-// Equation: ty_follower - (base_radius + eccentricity * cos(rx_cam)) = 0
+// Sinusoidal follower displacement: tz_follower = base_radius + lift * sin(rx_cam)
+// Models a simple harmonic cam profile.
 
 #[derive(Debug)]
 pub struct CamEquation {
-    pub ty_follower: VariableId,
+    pub tz_follower: VariableId,
     pub rx_cam: VariableId,
-    pub eccentricity: f64,
+    pub lift: f64,
     pub base_radius: f64,
     ids: Vec<VariableId>,
 }
 
 impl CamEquation {
-    pub fn new(ty_follower: VariableId, rx_cam: VariableId, eccentricity: f64, base_radius: f64) -> Self {
-        Self { ty_follower, rx_cam, eccentricity, base_radius, ids: vec![ty_follower, rx_cam] }
+    pub fn new(tz_follower: VariableId, rx_cam: VariableId, lift: f64, base_radius: f64) -> Self {
+        Self { tz_follower, rx_cam, lift, base_radius, ids: vec![tz_follower, rx_cam] }
     }
 }
 
 impl Equation for CamEquation {
     fn eval(&self, vars: &VariableStore) -> f64 {
-        let ty = vars.value(self.ty_follower);
-        let rx = vars.value(self.rx_cam);
-        ty - (self.base_radius + self.eccentricity * rx.cos())
+        let expected = self.base_radius + self.lift * vars.value(self.rx_cam).sin();
+        vars.value(self.tz_follower) - expected
     }
 
     fn jacobian_row(&self, vars: &VariableStore) -> Vec<(VariableId, f64)> {
-        let rx = vars.value(self.rx_cam);
         vec![
-            (self.ty_follower, 1.0),
-            (self.rx_cam, self.eccentricity * rx.sin()),
+            (self.tz_follower, 1.0),
+            (self.rx_cam, -self.lift * vars.value(self.rx_cam).cos()),
         ]
     }
 
@@ -1129,56 +1126,56 @@ mod tests {
     }
 
     #[test]
-    fn cam_at_zero_degrees_gives_max_lift() {
+    fn cam_at_zero_degrees_gives_base_radius() {
         let mut vars = VariableStore::new();
-        let ty_follower = vars.add(Variable::new(15.0)); // base_radius + eccentricity = 10 + 5
+        let tz_follower = vars.add(Variable::new(10.0)); // base_radius + lift * sin(0) = 10
         let rx_cam = vars.add(Variable::new(0.0)); // 0 degrees
 
-        let eq = CamEquation::new(ty_follower, rx_cam, 5.0, 10.0);
-        // ty - (base_radius + eccentricity * cos(0)) = 15 - (10 + 5*1) = 0
+        let eq = CamEquation::new(tz_follower, rx_cam, 5.0, 10.0);
+        // tz - (base_radius + lift * sin(0)) = 10 - (10 + 0) = 0
         assert!(eq.eval(&vars).abs() < 1e-9,
-            "Cam at 0 deg should give max lift (base_radius + eccentricity)");
+            "Cam at 0 deg should give base_radius");
     }
 
     #[test]
-    fn cam_at_180_degrees_gives_min_lift() {
+    fn cam_at_90_degrees_gives_max_lift() {
         let mut vars = VariableStore::new();
-        let ty_follower = vars.add(Variable::new(5.0)); // base_radius - eccentricity = 10 - 5
-        let rx_cam = vars.add(Variable::new(std::f64::consts::PI)); // 180 degrees
-
-        let eq = CamEquation::new(ty_follower, rx_cam, 5.0, 10.0);
-        // ty - (base_radius + eccentricity * cos(PI)) = 5 - (10 + 5*(-1)) = 5 - 5 = 0
-        assert!(eq.eval(&vars).abs() < 1e-9,
-            "Cam at 180 deg should give min lift (base_radius - eccentricity)");
-    }
-
-    #[test]
-    fn cam_at_90_degrees_gives_base_radius() {
-        let mut vars = VariableStore::new();
-        let ty_follower = vars.add(Variable::new(10.0)); // base_radius = 10
+        let tz_follower = vars.add(Variable::new(15.0)); // base_radius + lift = 10 + 5
         let rx_cam = vars.add(Variable::new(std::f64::consts::FRAC_PI_2)); // 90 degrees
 
-        let eq = CamEquation::new(ty_follower, rx_cam, 5.0, 10.0);
-        // ty - (base_radius + eccentricity * cos(PI/2)) = 10 - (10 + 5*0) = 0
+        let eq = CamEquation::new(tz_follower, rx_cam, 5.0, 10.0);
+        // tz - (base_radius + lift * sin(PI/2)) = 15 - (10 + 5*1) = 0
         assert!(eq.eval(&vars).abs() < 1e-9,
-            "Cam at 90 deg should give base_radius");
+            "Cam at 90 deg should give max lift (base_radius + lift)");
+    }
+
+    #[test]
+    fn cam_at_180_degrees_gives_base_radius_again() {
+        let mut vars = VariableStore::new();
+        let tz_follower = vars.add(Variable::new(10.0)); // base_radius + lift * sin(PI) = 10
+        let rx_cam = vars.add(Variable::new(std::f64::consts::PI)); // 180 degrees
+
+        let eq = CamEquation::new(tz_follower, rx_cam, 5.0, 10.0);
+        // tz - (base_radius + lift * sin(PI)) = 10 - (10 + 0) ~ 0
+        assert!(eq.eval(&vars).abs() < 1e-9,
+            "Cam at 180 deg should give base_radius");
     }
 
     #[test]
     fn cam_jacobian_is_correct() {
         let mut vars = VariableStore::new();
-        let ty_follower = vars.add(Variable::new(12.0));
+        let tz_follower = vars.add(Variable::new(12.0));
         let rx_cam = vars.add(Variable::new(std::f64::consts::FRAC_PI_4)); // 45 degrees
 
-        let eq = CamEquation::new(ty_follower, rx_cam, 5.0, 10.0);
+        let eq = CamEquation::new(tz_follower, rx_cam, 5.0, 10.0);
         let jac = eq.jacobian_row(&vars);
 
-        // d/d(ty) = 1.0
-        assert!((jac[0].1 - 1.0).abs() < 1e-9, "d/d(ty) should be 1.0");
-        // d/d(rx) = eccentricity * sin(rx) = 5 * sin(PI/4) = 5 * sqrt(2)/2
-        let expected_drx = 5.0 * (std::f64::consts::FRAC_PI_4).sin();
+        // d/d(tz) = 1.0
+        assert!((jac[0].1 - 1.0).abs() < 1e-9, "d/d(tz) should be 1.0");
+        // d/d(rx) = -lift * cos(rx) = -5 * cos(PI/4) = -5 * sqrt(2)/2
+        let expected_drx = -5.0 * (std::f64::consts::FRAC_PI_4).cos();
         assert!((jac[1].1 - expected_drx).abs() < 1e-9,
-            "d/d(rx) should be eccentricity * sin(rx_cam), got {}, expected {}", jac[1].1, expected_drx);
+            "d/d(rx) should be -lift * cos(rx_cam), got {}, expected {}", jac[1].1, expected_drx);
     }
 
     #[test]
@@ -1188,19 +1185,19 @@ mod tests {
 
         let mut graph = ConstraintGraph::new();
 
-        // Cam: rx_cam = 0, so ty_follower should converge to base_radius + eccentricity = 15
-        let rx_cam = graph.variables.add(Variable::fixed(0.0));
-        let ty_follower = graph.variables.add(Variable::new(0.0)); // start far from solution
+        // Cam: rx_cam = PI/2, so tz_follower should converge to base_radius + lift = 15
+        let rx_cam = graph.variables.add(Variable::fixed(std::f64::consts::FRAC_PI_2));
+        let tz_follower = graph.variables.add(Variable::new(0.0)); // start far from solution
 
-        graph.add_equation(Box::new(CamEquation::new(ty_follower, rx_cam, 5.0, 10.0)));
+        graph.add_equation(Box::new(CamEquation::new(tz_follower, rx_cam, 5.0, 10.0)));
 
         let config = SolverConfig { max_iterations: 100, tolerance: 1e-8 };
         let result = solve(&mut graph, &config).unwrap();
 
         assert!(result.converged, "Cam solver should converge");
-        let solved_ty = graph.variables.value(ty_follower);
-        assert!((solved_ty - 15.0).abs() < 1e-6,
-            "Follower should be at max lift 15.0, got {:.6}", solved_ty);
+        let solved_tz = graph.variables.value(tz_follower);
+        assert!((solved_tz - 15.0).abs() < 1e-6,
+            "Follower should be at max lift 15.0, got {:.6}", solved_tz);
     }
 
     #[test]
