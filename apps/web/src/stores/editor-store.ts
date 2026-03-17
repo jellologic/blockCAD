@@ -19,7 +19,12 @@ import {
   RIGHT_PLANE,
 } from "@blockCAD/kernel";
 import { toast } from "sonner";
-import { SAMPLE_MODELS } from "@/lib/samples";
+// Lazy-loaded to avoid circular dependency with @blockCAD/kernel
+let _sampleModules: typeof import("@/lib/samples") | null = null;
+async function getSampleModels() {
+  if (!_sampleModules) _sampleModules = await import("@/lib/samples");
+  return _sampleModules.SAMPLE_MODELS;
+}
 
 type EditorMode = "view" | "sketch" | "select-face" | "select-edge" | "select-plane";
 
@@ -203,7 +208,7 @@ interface EditorState {
   setMeasureResult: (result: MeasureResult | null) => void;
 
   // Sample models
-  loadSample: (sampleId: string) => void;
+  loadSample: (sampleId: string) => Promise<void>;
 
   // Export actions
   exportSTL: (binary?: boolean) => void;
@@ -1197,8 +1202,9 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     });
   },
 
-  loadSample: (sampleId) => {
-    const sample = SAMPLE_MODELS.find((s) => s.id === sampleId);
+  loadSample: async (sampleId) => {
+    const models = await getSampleModels();
+    const sample = models.find((s) => s.id === sampleId);
     if (!sample) return;
     const fresh = new KernelClient();
     try {
