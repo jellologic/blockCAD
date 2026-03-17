@@ -63,6 +63,15 @@ impl KernelHandle {
             .map_err(|e| e.into())
     }
 
+    /// Tessellate for viewport display (coarser LOD, skips validation for speed).
+    pub fn tessellate_viewport(
+        &mut self,
+    ) -> Result<Vec<u8>, JsValue> {
+        self.core
+            .tessellate_viewport()
+            .map_err(|e| e.into())
+    }
+
     /// Get the feature list as JSON.
     pub fn get_features_json(&self) -> Result<String, JsValue> {
         self.core.get_features_json().map_err(|e| e.into())

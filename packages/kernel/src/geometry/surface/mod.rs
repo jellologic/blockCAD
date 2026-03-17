@@ -33,4 +33,13 @@ pub trait Surface: Send + Sync + std::fmt::Debug {
 
     /// Whether the surface is closed in v direction
     fn is_closed_v(&self) -> bool;
+
+    /// Clone this surface into a boxed trait object.
+    fn clone_box(&self) -> Box<dyn Surface>;
+}
+
+impl Clone for Box<dyn Surface> {
+    fn clone(&self) -> Self {
+        self.clone_box()
+    }
 }

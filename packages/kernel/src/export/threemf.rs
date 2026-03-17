@@ -153,6 +153,7 @@ mod tests {
             indices: vec![0, 1, 2],
             face_ids: vec![0],
             colors: vec![],
+            ..Default::default()
         }
     }
 
@@ -185,6 +186,7 @@ mod tests {
             normals: vec![0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0],
             uvs: vec![], indices: vec![0, 1, 2], face_ids: vec![0],
             colors: vec![1.0, 0.0, 0.0, 1.0,  0.0, 1.0, 0.0, 1.0,  0.0, 0.0, 1.0, 1.0], // RGB vertices
+            ..Default::default()
         };
         let opts = ThreeMfOptions { unit: "millimeter".into(), vertex_colors: true };
         let bytes = export_3mf(&mesh, "test", &opts).unwrap();
@@ -207,6 +209,7 @@ mod tests {
             normals: vec![0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0],
             uvs: vec![], indices: vec![0, 1, 2], face_ids: vec![0],
             colors: vec![1.0, 0.0, 0.0, 1.0,  0.0, 1.0, 0.0, 1.0,  0.0, 0.0, 1.0, 1.0],
+            ..Default::default()
         };
         // vertex_colors disabled — should NOT emit colors even if mesh has them
         let opts = ThreeMfOptions { unit: "millimeter".into(), vertex_colors: false };

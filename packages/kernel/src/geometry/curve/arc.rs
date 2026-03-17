@@ -108,6 +108,10 @@ impl Curve for Arc3 {
         ((self.end_angle - self.start_angle).abs() - std::f64::consts::TAU).abs()
             < crate::geometry::ANGLE_TOLERANCE
     }
+
+    fn clone_box(&self) -> Box<dyn Curve> {
+        Box::new(self.clone())
+    }
 }
 
 #[cfg(test)]

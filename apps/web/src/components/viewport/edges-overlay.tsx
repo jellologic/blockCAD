@@ -9,13 +9,25 @@ interface EdgesOverlayProps {
 export function EdgesOverlay({ meshData }: EdgesOverlayProps) {
   const edgesGeometry = useMemo(() => {
     const geo = new THREE.BufferGeometry();
-    geo.setAttribute(
-      "position",
-      new THREE.BufferAttribute(meshData.positions, 3)
-    );
-    geo.setIndex(new THREE.BufferAttribute(meshData.indices, 1));
-    geo.computeVertexNormals();
-    return new THREE.EdgesGeometry(geo, 15);
+    if (meshData.edgePositions && meshData.edgeCount > 0) {
+      // Use pre-computed feature edges from kernel (fast path)
+      geo.setAttribute(
+        "position",
+        new THREE.BufferAttribute(meshData.edgePositions, 3)
+      );
+    } else {
+      // Fallback: compute edges on GPU side (legacy/empty case)
+      const fallback = new THREE.BufferGeometry();
+      fallback.setAttribute(
+        "position",
+        new THREE.BufferAttribute(meshData.positions, 3)
+      );
+      fallback.setIndex(new THREE.BufferAttribute(meshData.indices, 1));
+      fallback.computeVertexNormals();
+      const edges = new THREE.EdgesGeometry(fallback, 15);
+      return edges;
+    }
+    return geo;
   }, [meshData]);
 
   return (

@@ -102,6 +102,10 @@ impl Curve for NurbsCurve {
         let last = &self.control_points[self.control_points.len() - 1];
         (last - first).norm() < crate::geometry::GEOMETRIC_TOLERANCE
     }
+
+    fn clone_box(&self) -> Box<dyn Curve> {
+        Box::new(self.clone())
+    }
 }
 
 #[cfg(test)]

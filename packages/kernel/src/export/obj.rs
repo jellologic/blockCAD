@@ -75,6 +75,7 @@ mod tests {
             indices: vec![0, 1, 2],
             face_ids: vec![0],
             colors: vec![],
+            ..Default::default()
         }
     }
 
@@ -94,6 +95,7 @@ mod tests {
             positions: vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0],
             normals: vec![0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0],
             uvs: vec![], indices: vec![0, 1, 2], face_ids: vec![0], colors: vec![],
+            ..Default::default()
         };
         let text = export_obj(&mesh, "test", &ObjOptions::default());
         assert!(text.contains("1//1"));

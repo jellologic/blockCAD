@@ -110,6 +110,10 @@ impl Surface for NurbsSurface {
     fn is_closed_v(&self) -> bool {
         false // TODO: check if first/last column of control points match
     }
+
+    fn clone_box(&self) -> Box<dyn Surface> {
+        Box::new(self.clone())
+    }
 }
 
 #[cfg(test)]

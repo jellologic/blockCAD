@@ -77,6 +77,10 @@ impl Curve for Circle3 {
     fn is_closed(&self) -> bool {
         true
     }
+
+    fn clone_box(&self) -> Box<dyn Curve> {
+        Box::new(self.clone())
+    }
 }
 
 #[cfg(test)]

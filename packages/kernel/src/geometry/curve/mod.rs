@@ -34,4 +34,13 @@ pub trait Curve: Send + Sync + std::fmt::Debug {
 
     /// Whether the curve is geometrically closed
     fn is_closed(&self) -> bool;
+
+    /// Clone this curve into a boxed trait object.
+    fn clone_box(&self) -> Box<dyn Curve>;
+}
+
+impl Clone for Box<dyn Curve> {
+    fn clone(&self) -> Self {
+        self.clone_box()
+    }
 }

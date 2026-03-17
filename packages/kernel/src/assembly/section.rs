@@ -177,6 +177,7 @@ mod tests {
             indices: vec![0, 1, 2, 0, 2, 3],
             face_ids: vec![],
             colors: vec![],
+            ..Default::default()
         }
     }
 

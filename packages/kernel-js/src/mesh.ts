@@ -10,6 +10,10 @@ export interface MeshData {
   faceIds: Uint32Array;
   vertexCount: number;
   triangleCount: number;
+  /** Pre-computed sharp/feature edge line segments: [x0,y0,z0, x1,y1,z1, ...] */
+  edgePositions: Float32Array;
+  /** Number of edge line segments */
+  edgeCount: number;
 }
 
 /**
@@ -40,6 +44,12 @@ export function parseMeshBytes(buffer: ArrayBuffer): MeshData {
   offset += triangleCount * 3 * 4;
 
   const faceIds = new Uint32Array(buffer, offset, triangleCount);
+  offset += triangleCount * 4;
+
+  const edgeCount = view.getUint32(offset, true);
+  offset += 4;
+
+  const edgePositions = new Float32Array(buffer, offset, edgeCount * 6);
 
   return {
     positions,
@@ -49,5 +59,7 @@ export function parseMeshBytes(buffer: ArrayBuffer): MeshData {
     faceIds,
     vertexCount,
     triangleCount,
+    edgePositions,
+    edgeCount,
   };
 }

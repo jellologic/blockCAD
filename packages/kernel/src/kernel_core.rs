@@ -93,6 +93,31 @@ impl KernelCore {
         Ok(mesh.to_bytes())
     }
 
+    /// Build a tessellated mesh for viewport display (coarser LOD, skips validation for speed).
+    pub fn build_mesh_viewport(
+        &mut self,
+    ) -> KernelResult<crate::tessellation::mesh::TriMesh> {
+        let brep = evaluate(&mut self.tree)?;
+        tessellate_brep(&brep, &TessellationParams::viewport())
+    }
+
+    /// Tessellate for viewport display (coarser LOD, skips validation for speed).
+    /// Returns the mesh as a byte buffer.
+    pub fn tessellate_viewport(
+        &mut self,
+    ) -> KernelResult<Vec<u8>> {
+        let mesh = self.build_mesh_viewport()?;
+        Ok(mesh.to_bytes())
+    }
+
+    /// Build a tessellated mesh using very coarse preview LOD (fastest, for drag operations).
+    pub fn tessellate_preview(
+        &mut self,
+    ) -> KernelResult<crate::tessellation::mesh::TriMesh> {
+        let brep = evaluate(&mut self.tree)?;
+        tessellate_brep(&brep, &TessellationParams::preview())
+    }
+
     /// Export as binary STL bytes.
     pub fn export_stl_binary(
         &mut self,
@@ -401,5 +426,53 @@ mod tests {
         assert_eq!(magic, 0x46546C67);
         let version = u32::from_le_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]);
         assert_eq!(version, 2);
+    }
+
+    #[test]
+    fn test_tessellate_viewport_returns_valid_bytes() {
+        let mut core = KernelCore::new();
+        core.add_feature("sketch", &make_sketch_json()).unwrap();
+        core.add_feature("extrude", &make_extrude_json(7.0)).unwrap();
+
+        let bytes = core.tessellate_viewport().unwrap();
+
+        let view = bytes.as_slice();
+        let vc = u32::from_le_bytes([view[0], view[1], view[2], view[3]]) as usize;
+        assert_eq!(vc, 24, "Viewport should have 24 vertices");
+    }
+
+    #[test]
+    fn test_tessellate_preview() {
+        let mut core = KernelCore::new();
+        core.add_feature("sketch", &make_sketch_json()).unwrap();
+        core.add_feature("extrude", &make_extrude_json(7.0)).unwrap();
+        let mesh = core.tessellate_preview().unwrap();
+        assert!(!mesh.positions.is_empty(), "Preview mesh should have vertices");
+        assert!(!mesh.indices.is_empty(), "Preview mesh should have indices");
+    }
+
+    #[test]
+    fn test_viewport_preset() {
+        let params = TessellationParams::viewport();
+        assert!(params.skip_validation);
+    }
+
+    #[test]
+    fn test_lod_presets_produce_valid_meshes() {
+        let mut core = KernelCore::new();
+        core.add_feature("sketch", &make_sketch_json()).unwrap();
+        core.add_feature("extrude", &make_extrude_json(7.0)).unwrap();
+
+        let preview = core.tessellate_preview().unwrap();
+        let viewport_bytes = core.tessellate_viewport().unwrap();
+        let default = core.build_mesh(0.01, 0.5).unwrap();
+
+        let preview_tris = preview.indices.len() / 3;
+        let default_tris = default.indices.len() / 3;
+
+        // All should produce valid meshes (box = 6 faces * 2 tris = 12)
+        assert!(preview_tris >= 12);
+        assert!(default_tris >= 12);
+        assert!(!viewport_bytes.is_empty());
     }
 }

@@ -26,6 +26,7 @@ fn valid_quad_mesh() {
         indices: vec![0, 1, 2, 0, 2, 3],
         face_ids: vec![0, 0],
         colors: vec![],
+        ..Default::default()
     };
     assert!(mesh.validate().is_err()); // not watertight
     assert_eq!(mesh.vertex_count(), 4);
@@ -41,6 +42,7 @@ fn out_of_bounds_index_fails() {
         indices: vec![0, 1, 5], // index 5 is out of bounds
         face_ids: vec![0],
         colors: vec![],
+        ..Default::default()
     };
     assert!(mesh.validate().is_err());
 }
@@ -54,6 +56,7 @@ fn mismatched_normals_fails() {
         indices: vec![0, 1, 2],
         face_ids: vec![0],
         colors: vec![],
+        ..Default::default()
     };
     assert!(mesh.validate().is_err());
 }
@@ -77,6 +80,7 @@ fn mesh_merge_preserves_structure() {
         indices: vec![0, 1, 2],
         face_ids: vec![0],
         colors: vec![],
+        ..Default::default()
     };
     let b = a.clone();
     let mut merged = a;

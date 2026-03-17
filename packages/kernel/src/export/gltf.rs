@@ -373,6 +373,7 @@ mod tests {
             indices: vec![0, 1, 2],
             face_ids: vec![0],
             colors: vec![],
+            ..Default::default()
         }
     }
 

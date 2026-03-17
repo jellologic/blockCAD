@@ -86,6 +86,10 @@ impl Surface for Plane {
     fn is_closed_v(&self) -> bool {
         false
     }
+
+    fn clone_box(&self) -> Box<dyn Surface> {
+        Box::new(self.clone())
+    }
 }
 
 #[cfg(test)]

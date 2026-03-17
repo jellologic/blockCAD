@@ -153,6 +153,20 @@ impl FeatureTree {
             self.cache[i] = None;
         }
     }
+
+    /// Update a feature's parameters and invalidate caches from that index onward.
+    pub fn update_params(
+        &mut self,
+        index: usize,
+        params: super::params::FeatureParams,
+    ) -> KernelResult<()> {
+        let feature = self.features.get_mut(index).ok_or_else(|| {
+            KernelError::NotFound(format!("Feature at index {}", index))
+        })?;
+        feature.params = params;
+        self.invalidate_from(index);
+        Ok(())
+    }
 }
 
 impl Default for FeatureTree {

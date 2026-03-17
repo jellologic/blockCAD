@@ -74,6 +74,23 @@ impl BRep {
     }
 }
 
+impl Clone for BRep {
+    fn clone(&self) -> Self {
+        Self {
+            vertices: self.vertices.clone(),
+            edges: self.edges.clone(),
+            coedges: self.coedges.clone(),
+            loops: self.loops.clone(),
+            faces: self.faces.clone(),
+            shells: self.shells.clone(),
+            solids: self.solids.clone(),
+            curves: self.curves.clone(),
+            surfaces: self.surfaces.clone(),
+            body: self.body.clone(),
+        }
+    }
+}
+
 impl Default for BRep {
     fn default() -> Self {
         Self::new()

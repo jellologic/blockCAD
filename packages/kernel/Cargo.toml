@@ -13,9 +13,10 @@ path = "src/bin/server.rs"
 required-features = ["server"]
 
 [features]
-default = ["client"]
+default = ["client", "parallel"]
 client = []
 server = ["client"]
+parallel = ["rayon"]
 wasm = ["wasm-bindgen", "js-sys", "web-sys", "console_error_panic_hook"]
 
 [dependencies]
@@ -24,6 +25,7 @@ thiserror = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 faer = { version = "0.19", default-features = false, features = ["std"] }
+rayon = { version = "1.10", optional = true }
 
 # Export formats
 zip = { version = "2", default-features = false, features = ["deflate-miniz"] }
@@ -42,6 +44,15 @@ wasm-bindgen-test = "0.3"
 stl_io = "0.7"    # Third-party STL parser for export validation
 tobj = "4"         # Third-party OBJ parser for export validation
 gltf = "1"         # Khronos glTF/GLB parser for export validation
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "tessellation"
+harness = false
+
+[[bench]]
+name = "evaluation"
+harness = false
 
 [lints.clippy]
 unwrap_used = "warn"

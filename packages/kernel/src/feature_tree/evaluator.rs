@@ -128,25 +128,39 @@ fn compute_from_surface_offset(
 
 /// Evaluate the feature tree, producing the final BRep.
 ///
-/// Replays operations from scratch up to the cursor.
+/// Uses cached BRep snapshots to skip unchanged features. Only features
+/// from the first dirty (uncached) index onward are re-evaluated.
 /// Features marked as Suppressed are skipped.
-///
-/// Currently rebuilds from scratch each time (no incremental caching).
-/// Caching will be added once BRep supports Clone or we implement
-/// a copy-on-write scheme.
 pub fn evaluate(tree: &mut FeatureTree) -> KernelResult<BRep> {
     let cursor = match tree.cursor() {
         Some(c) => c,
         None => return Ok(BRep::new()),
     };
 
-    let mut current_brep = BRep::new();
+    // Find the latest valid cache entry before any dirty feature.
+    // A feature is "dirty" if its cache slot is None.
+    let start_from = (0..=cursor)
+        .find(|&i| tree.cache_at(i).is_none())
+        .unwrap_or(cursor + 1); // all cached
 
-    for i in 0..=cursor {
+    // If everything up to cursor is cached, return the cached result directly.
+    if start_from > cursor {
+        return Ok(tree.cache_at(cursor).unwrap().clone());
+    }
+
+    // Load BRep state from the cache entry just before the first dirty feature.
+    let mut current_brep = if start_from > 0 {
+        tree.cache_at(start_from - 1).unwrap().clone()
+    } else {
+        BRep::new()
+    };
+
+    for i in start_from..=cursor {
         let feature = &tree.features()[i];
 
         if feature.suppressed {
             tree.features_mut()[i].state = FeatureState::Evaluated;
+            tree.set_cache(i, current_brep.clone());
             continue;
         }
 
@@ -782,6 +796,9 @@ pub fn evaluate(tree: &mut FeatureTree) -> KernelResult<BRep> {
                 });
             }
         }
+
+        // Cache the BRep state after this feature for incremental re-evaluation.
+        tree.set_cache(i, current_brep.clone());
     }
 
     Ok(current_brep)
@@ -940,6 +957,164 @@ mod tests {
         tree.unsuppress(1).unwrap();
         let brep = evaluate(&mut tree).unwrap();
         assert_eq!(brep.faces.len(), 6);
+    }
+
+    /// Build a tree with sketch(0) + extrude(1) + chamfer(2).
+    fn build_three_feature_tree() -> FeatureTree {
+        let mut tree = build_sketch_extrude_tree(7.0);
+        tree.push(Feature::new(
+            "chamfer-1".into(),
+            "Chamfer Edges".into(),
+            FeatureKind::Chamfer,
+            FeatureParams::Chamfer(crate::operations::chamfer::ChamferParams {
+                edge_indices: vec![0],
+                distance: 0.5,
+                distance2: None,
+                mode: None,
+            }),
+        ));
+        tree
+    }
+
+    #[test]
+    fn test_cache_populated_after_evaluate() {
+        let mut tree = build_sketch_extrude_tree(7.0);
+        evaluate(&mut tree).unwrap();
+
+        // Both features should now have cached BRep state
+        assert!(tree.cache_at(0).is_some(), "Sketch cache should be populated");
+        assert!(tree.cache_at(1).is_some(), "Extrude cache should be populated");
+    }
+
+    #[test]
+    fn test_cache_hit_skips_upstream_features() {
+        let mut tree = build_three_feature_tree();
+
+        // First evaluation populates all caches
+        let brep1 = evaluate(&mut tree).unwrap();
+        let face_count_1 = brep1.faces.len();
+
+        // Invalidate only the last feature (chamfer)
+        tree.invalidate_from(2);
+        assert!(tree.cache_at(0).is_some(), "Sketch cache should survive");
+        assert!(tree.cache_at(1).is_some(), "Extrude cache should survive");
+        assert!(tree.cache_at(2).is_none(), "Chamfer cache should be cleared");
+
+        // Re-evaluate: should reuse cache for features 0-1, only re-run feature 2
+        let brep2 = evaluate(&mut tree).unwrap();
+        assert_eq!(brep2.faces.len(), face_count_1, "Result should be identical");
+        assert!(tree.cache_at(2).is_some(), "Chamfer cache should be repopulated");
+    }
+
+    #[test]
+    fn test_cache_miss_when_early_feature_modified() {
+        let mut tree = build_three_feature_tree();
+
+        // First evaluation
+        evaluate(&mut tree).unwrap();
+
+        // Invalidate from the extrude (feature 1) -- simulates param change
+        tree.invalidate_from(1);
+        assert!(tree.cache_at(0).is_some(), "Sketch cache should survive");
+        assert!(tree.cache_at(1).is_none(), "Extrude cache should be cleared");
+        assert!(tree.cache_at(2).is_none(), "Chamfer cache should be cleared");
+
+        // Re-evaluate: features 1 and 2 must be re-evaluated
+        let brep = evaluate(&mut tree).unwrap();
+        assert!(tree.cache_at(1).is_some(), "Extrude cache should be repopulated");
+        assert!(tree.cache_at(2).is_some(), "Chamfer cache should be repopulated");
+        assert!(brep.faces.len() > 0);
+    }
+
+    #[test]
+    fn test_suppress_invalidates_downstream_cache() {
+        let mut tree = build_three_feature_tree();
+
+        // First evaluation
+        evaluate(&mut tree).unwrap();
+        assert!(tree.cache_at(2).is_some());
+
+        // Suppress the extrude (feature 1) -- invalidates features 1+
+        tree.suppress(1).unwrap();
+        assert!(tree.cache_at(1).is_none(), "Suppressed feature cache should be cleared");
+        assert!(tree.cache_at(2).is_none(), "Downstream cache should be cleared");
+
+        // Chamfer will fail because there's no geometry, which is expected.
+        // The extrude is suppressed so current_brep stays empty.
+        let result = evaluate(&mut tree);
+        assert!(result.is_err(), "Chamfer on empty body should fail");
+    }
+
+    #[test]
+    fn test_push_new_feature_does_not_clear_existing_cache() {
+        let mut tree = build_sketch_extrude_tree(7.0);
+        evaluate(&mut tree).unwrap();
+
+        assert!(tree.cache_at(0).is_some());
+        assert!(tree.cache_at(1).is_some());
+
+        // Push a new feature at the end
+        tree.push(Feature::new(
+            "chamfer-1".into(),
+            "Chamfer".into(),
+            FeatureKind::Chamfer,
+            FeatureParams::Chamfer(crate::operations::chamfer::ChamferParams {
+                edge_indices: vec![0],
+                distance: 0.5,
+                distance2: None,
+                mode: None,
+            }),
+        ));
+
+        // Existing caches should be preserved
+        assert!(tree.cache_at(0).is_some(), "Existing sketch cache should survive push");
+        assert!(tree.cache_at(1).is_some(), "Existing extrude cache should survive push");
+        assert!(tree.cache_at(2).is_none(), "New feature should start uncached");
+
+        // Re-evaluate: only the new feature should be computed
+        let brep = evaluate(&mut tree).unwrap();
+        assert!(tree.cache_at(2).is_some(), "New feature cache should be populated");
+        assert!(brep.faces.len() > 0);
+    }
+
+    #[test]
+    fn test_update_params_invalidates_cache() {
+        let mut tree = build_sketch_extrude_tree(7.0);
+        evaluate(&mut tree).unwrap();
+
+        assert!(tree.cache_at(0).is_some());
+        assert!(tree.cache_at(1).is_some());
+
+        // Update extrude params (changes depth)
+        tree.update_params(
+            1,
+            FeatureParams::Extrude(crate::operations::extrude::ExtrudeParams::blind(
+                Vec3::new(0.0, 0.0, 1.0),
+                12.0,
+            )),
+        ).unwrap();
+
+        assert!(tree.cache_at(0).is_some(), "Upstream cache should survive");
+        assert!(tree.cache_at(1).is_none(), "Modified feature cache should be cleared");
+
+        let brep = evaluate(&mut tree).unwrap();
+        assert_eq!(brep.faces.len(), 6);
+        assert!(tree.cache_at(1).is_some(), "Cache should be repopulated");
+    }
+
+    #[test]
+    fn test_fully_cached_returns_without_reeval() {
+        let mut tree = build_sketch_extrude_tree(7.0);
+
+        // First evaluation
+        let brep1 = evaluate(&mut tree).unwrap();
+
+        // Second evaluation should hit cache entirely
+        let brep2 = evaluate(&mut tree).unwrap();
+
+        assert_eq!(brep1.faces.len(), brep2.faces.len());
+        assert_eq!(brep1.vertices.len(), brep2.vertices.len());
+        assert_eq!(brep1.edges.len(), brep2.edges.len());
     }
 
     #[test]
