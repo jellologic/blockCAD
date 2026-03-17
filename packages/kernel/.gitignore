@@ -1,5 +1,4 @@
 target/
-pkg/
 pkg-node/
 node_modules
 dist

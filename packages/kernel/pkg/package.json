@@ -1,0 +1,16 @@
+{
+  "name": "blockcad-kernel",
+  "type": "module",
+  "description": "Parametric CAD kernel for blockCAD",
+  "version": "0.1.0",
+  "files": [
+    "blockcad_kernel_bg.wasm",
+    "blockcad_kernel.js",
+    "blockcad_kernel.d.ts"
+  ],
+  "main": "blockcad_kernel.js",
+  "types": "blockcad_kernel.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ]
+}
