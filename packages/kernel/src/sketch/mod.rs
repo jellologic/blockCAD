@@ -5,6 +5,7 @@ pub mod entity;
 pub mod sketch;
 pub mod profile;
 pub mod solver_bridge;
+pub mod tools;
 pub mod variable_map;
 
 pub use block::{SketchBlock, SketchBlockInstance};

@@ -14,5 +14,7 @@ pub mod sweep;
 pub mod loft;
 pub mod draft;
 pub mod datum_plane;
+pub mod transform;
+pub mod transform_body;
 
 pub use traits::Operation;

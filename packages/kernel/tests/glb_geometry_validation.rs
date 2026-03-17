@@ -16,7 +16,7 @@ use blockcad_kernel::operations::pattern::circular::CircularPatternParams;
 use blockcad_kernel::operations::pattern::linear::LinearPatternParams;
 use blockcad_kernel::operations::pattern::mirror::MirrorParams;
 use blockcad_kernel::operations::revolve::RevolveParams;
-use blockcad_kernel::operations::shell::ShellParams;
+use blockcad_kernel::operations::shell::{ShellDirection, ShellParams};
 use blockcad_kernel::sketch::constraint::{Constraint, ConstraintKind};
 use blockcad_kernel::sketch::entity::SketchEntity;
 use blockcad_kernel::sketch::Sketch;
@@ -277,8 +277,7 @@ fn glb_box_with_chamfer() {
         FeatureParams::Chamfer(ChamferParams {
             edge_indices: vec![0],
             distance: 1.0,
-            distance2: None,
-        }),
+            distance2: None, mode: None }),
     ));
 
     let (verts, tris, _min, _max, _) = run_glb_pipeline(&mut tree, "box_with_chamfer");
@@ -297,8 +296,7 @@ fn glb_box_with_shell() {
         "sh1".into(), "Shell".into(), FeatureKind::Shell,
         FeatureParams::Shell(ShellParams {
             faces_to_remove: vec![1],
-            thickness: 0.5,
-        }),
+            thickness: 0.5, direction: ShellDirection::Inward }),
     ));
 
     let (verts, tris, _min, _max, _) = run_glb_pipeline(&mut tree, "box_with_shell");

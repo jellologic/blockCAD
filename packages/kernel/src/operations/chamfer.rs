@@ -13,12 +13,30 @@ use crate::topology::BRep;
 
 use super::traits::Operation;
 
+/// Chamfer mode specifying how the two cut distances are determined.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ChamferMode {
+    /// Same distance on both faces
+    EqualDistance { distance: f64 },
+    /// Different distance on each face
+    TwoDistance { distance1: f64, distance2: f64 },
+    /// Angle + distance mode: distance along the reference face,
+    /// angle (in radians) from the reference face determines the second distance.
+    /// The second distance is computed as `distance * tan(angle)`.
+    /// Angle must be in (0, PI/2) exclusive.
+    AngleDistance { distance: f64, angle: f64 },
+}
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ChamferParams {
     pub edge_indices: Vec<u32>,
     pub distance: f64,
-    /// Optional second distance for asymmetric chamfer
+    /// Optional second distance for asymmetric chamfer (legacy field)
     pub distance2: Option<f64>,
+    /// Optional chamfer mode. When set, overrides `distance`/`distance2`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mode: Option<ChamferMode>,
 }
 
 #[derive(Debug)]
@@ -47,6 +65,45 @@ struct EndpointSplit {
     face_b: FaceId,
 }
 
+/// Resolve the two chamfer distances from mode or legacy fields.
+fn resolve_chamfer_distances(params: &ChamferParams) -> KernelResult<(f64, f64)> {
+    let (d1, d2) = if let Some(ref mode) = params.mode {
+        match mode {
+            ChamferMode::EqualDistance { distance } => (*distance, *distance),
+            ChamferMode::TwoDistance { distance1, distance2 } => (*distance1, *distance2),
+            ChamferMode::AngleDistance { distance, angle } => {
+                // Validate angle is in (0, PI/2) exclusive
+                if *angle <= 0.0 || *angle >= std::f64::consts::FRAC_PI_2 {
+                    return Err(KernelError::InvalidParameter {
+                        param: "angle".into(),
+                        value: format!(
+                            "Chamfer angle must be between 0 and 90 degrees exclusive (got {} rad = {}°)",
+                            angle,
+                            angle.to_degrees()
+                        ),
+                    });
+                }
+                let d2 = distance * angle.tan();
+                (*distance, d2)
+            }
+        }
+    } else {
+        // Legacy: use distance / distance2 fields
+        let d1 = params.distance;
+        let d2 = params.distance2.unwrap_or(d1);
+        (d1, d2)
+    };
+
+    if d1 <= 0.0 || d2 <= 0.0 {
+        return Err(KernelError::InvalidParameter {
+            param: "distance".into(),
+            value: format!("Chamfer distances must be positive: d1={}, d2={}", d1, d2),
+        });
+    }
+
+    Ok((d1, d2))
+}
+
 pub fn chamfer_edges(brep: &BRep, params: &ChamferParams) -> KernelResult<BRep> {
     if brep.faces.is_empty() {
         return Err(KernelError::Operation {
@@ -55,15 +112,8 @@ pub fn chamfer_edges(brep: &BRep, params: &ChamferParams) -> KernelResult<BRep> 
         });
     }
 
-    let d1 = params.distance;
-    let d2 = params.distance2.unwrap_or(d1);
-
-    if d1 <= 0.0 || d2 <= 0.0 {
-        return Err(KernelError::InvalidParameter {
-            param: "distance".into(),
-            value: format!("Chamfer distances must be positive: d1={}, d2={}", d1, d2),
-        });
-    }
+    // Resolve distances from mode (if set) or legacy fields
+    let (d1, d2) = resolve_chamfer_distances(params)?;
 
     let shared_edges = find_shared_edges(brep, 1e-9);
 
@@ -367,6 +417,7 @@ mod tests {
             edge_indices: vec![0],
             distance: 1.0,
             distance2: None,
+            mode: None,
         };
         let result = chamfer_edges(&brep, &params).unwrap();
         // 6 original faces + 1 chamfer face = 7
@@ -386,6 +437,7 @@ mod tests {
             edge_indices: vec![0],
             distance: 1.0,
             distance2: None,
+            mode: None,
         };
         assert!(chamfer_edges(&brep, &params).is_err());
     }
@@ -397,6 +449,7 @@ mod tests {
             edge_indices: vec![999],
             distance: 1.0,
             distance2: None,
+            mode: None,
         };
         assert!(chamfer_edges(&brep, &params).is_err());
     }
@@ -410,6 +463,7 @@ mod tests {
             edge_indices: vec![0],
             distance: 1.0,
             distance2: None,
+            mode: None,
         };
         let result = chamfer_edges(&brep, &params).unwrap();
         let mesh = tessellate_brep(&result, &TessellationParams::default()).unwrap();
@@ -427,6 +481,7 @@ mod tests {
             edge_indices: vec![0, 1, 2],
             distance: 1.0,
             distance2: None,
+            mode: None,
         };
         let result = chamfer_edges(&brep, &params).unwrap();
         // 6 original + 3 chamfer faces = 9
@@ -441,10 +496,159 @@ mod tests {
             edge_indices: vec![0],
             distance: 1.0,
             distance2: Some(2.0),
+            mode: None,
         };
         let result = chamfer_edges(&brep, &params).unwrap();
         assert_eq!(result.faces.len(), 7);
         assert!(matches!(result.body, Body::Solid(_)));
     }
 
+    // --- Angle-distance mode tests ---
+
+    #[test]
+    fn chamfer_angle_distance_45_degrees_equals_equal_distance() {
+        // At 45°, tan(45°) = 1.0, so d2 = d1 * 1.0 = d1
+        let brep = build_box_brep(10.0, 10.0, 10.0).unwrap();
+        let angle = std::f64::consts::FRAC_PI_4; // 45°
+
+        let params_angle = ChamferParams {
+            edge_indices: vec![0],
+            distance: 0.0,  // legacy field ignored when mode is set
+            distance2: None,
+            mode: Some(ChamferMode::AngleDistance { distance: 1.0, angle }),
+        };
+        let result_angle = chamfer_edges(&brep, &params_angle).unwrap();
+
+        let params_equal = ChamferParams {
+            edge_indices: vec![0],
+            distance: 1.0,
+            distance2: None,
+            mode: Some(ChamferMode::EqualDistance { distance: 1.0 }),
+        };
+        let result_equal = chamfer_edges(&brep, &params_equal).unwrap();
+
+        assert_eq!(result_angle.faces.len(), 7);
+        assert_eq!(result_equal.faces.len(), 7);
+        assert!(matches!(result_angle.body, Body::Solid(_)));
+    }
+
+    #[test]
+    fn chamfer_angle_distance_30_degrees() {
+        // At 30°, tan(30°) ≈ 0.5774, so d2 ≈ 1.0 * 0.5774
+        let brep = build_box_brep(10.0, 10.0, 10.0).unwrap();
+        let angle = std::f64::consts::FRAC_PI_6; // 30°
+
+        let params = ChamferParams {
+            edge_indices: vec![0],
+            distance: 0.0,
+            distance2: None,
+            mode: Some(ChamferMode::AngleDistance { distance: 1.0, angle }),
+        };
+        let result = chamfer_edges(&brep, &params).unwrap();
+        assert_eq!(result.faces.len(), 7);
+        assert!(matches!(result.body, Body::Solid(_)));
+
+        // Verify the resolved distances are correct via the helper
+        let (d1, d2) = resolve_chamfer_distances(&params).unwrap();
+        assert!((d1 - 1.0).abs() < 1e-12);
+        assert!((d2 - (30.0_f64.to_radians().tan())).abs() < 1e-9);
+    }
+
+    #[test]
+    fn chamfer_angle_distance_60_degrees() {
+        // At 60°, tan(60°) ≈ 1.7321, so d2 ≈ 1.0 * 1.7321
+        let brep = build_box_brep(10.0, 10.0, 10.0).unwrap();
+        let angle = std::f64::consts::FRAC_PI_3; // 60°
+
+        let params = ChamferParams {
+            edge_indices: vec![0],
+            distance: 0.0,
+            distance2: None,
+            mode: Some(ChamferMode::AngleDistance { distance: 1.0, angle }),
+        };
+        let result = chamfer_edges(&brep, &params).unwrap();
+        assert_eq!(result.faces.len(), 7);
+        assert!(matches!(result.body, Body::Solid(_)));
+
+        let (d1, d2) = resolve_chamfer_distances(&params).unwrap();
+        assert!((d1 - 1.0).abs() < 1e-12);
+        assert!((d2 - (60.0_f64.to_radians().tan())).abs() < 1e-9);
+    }
+
+    #[test]
+    fn chamfer_angle_distance_invalid_angle_zero() {
+        let brep = build_box_brep(10.0, 10.0, 10.0).unwrap();
+        let params = ChamferParams {
+            edge_indices: vec![0],
+            distance: 0.0,
+            distance2: None,
+            mode: Some(ChamferMode::AngleDistance { distance: 1.0, angle: 0.0 }),
+        };
+        assert!(chamfer_edges(&brep, &params).is_err());
+    }
+
+    #[test]
+    fn chamfer_angle_distance_invalid_angle_90() {
+        let brep = build_box_brep(10.0, 10.0, 10.0).unwrap();
+        let params = ChamferParams {
+            edge_indices: vec![0],
+            distance: 0.0,
+            distance2: None,
+            mode: Some(ChamferMode::AngleDistance {
+                distance: 1.0,
+                angle: std::f64::consts::FRAC_PI_2,
+            }),
+        };
+        assert!(chamfer_edges(&brep, &params).is_err());
+    }
+
+    #[test]
+    fn chamfer_angle_distance_on_box_edge() {
+        use crate::tessellation::{tessellate_brep, TessellationParams};
+
+        let brep = build_box_brep(10.0, 10.0, 10.0).unwrap();
+        let params = ChamferParams {
+            edge_indices: vec![0],
+            distance: 0.0,
+            distance2: None,
+            mode: Some(ChamferMode::AngleDistance {
+                distance: 2.0,
+                angle: std::f64::consts::FRAC_PI_4, // 45°
+            }),
+        };
+        let result = chamfer_edges(&brep, &params).unwrap();
+        assert_eq!(result.faces.len(), 7);
+        assert!(matches!(result.body, Body::Solid(_)));
+
+        // Verify it tessellates without error
+        let mesh = tessellate_brep(&result, &TessellationParams::default()).unwrap();
+        mesh.validate().unwrap();
+        assert!(mesh.triangle_count() > 0);
+    }
+
+    #[test]
+    fn chamfer_mode_equal_distance_works() {
+        let brep = build_box_brep(10.0, 10.0, 10.0).unwrap();
+        let params = ChamferParams {
+            edge_indices: vec![0],
+            distance: 0.0,
+            distance2: None,
+            mode: Some(ChamferMode::EqualDistance { distance: 1.5 }),
+        };
+        let result = chamfer_edges(&brep, &params).unwrap();
+        assert_eq!(result.faces.len(), 7);
+    }
+
+    #[test]
+    fn chamfer_mode_two_distance_works() {
+        let brep = build_box_brep(10.0, 10.0, 10.0).unwrap();
+        let params = ChamferParams {
+            edge_indices: vec![0],
+            distance: 0.0,
+            distance2: None,
+            mode: Some(ChamferMode::TwoDistance { distance1: 1.0, distance2: 2.0 }),
+        };
+        let result = chamfer_edges(&brep, &params).unwrap();
+        assert_eq!(result.faces.len(), 7);
+    }
 }

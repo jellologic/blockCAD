@@ -33,6 +33,10 @@ pub enum FeatureParams {
     CircularPattern(crate::operations::pattern::circular::CircularPatternParams),
     Mirror(crate::operations::pattern::mirror::MirrorParams),
     DatumPlane(crate::operations::datum_plane::DatumPlaneParams),
+    VariableFillet(crate::operations::fillet::VariableFilletParams),
+    FaceFillet(crate::operations::fillet::FaceFilletParams),
+    MoveBody(crate::operations::transform_body::MoveBodyParams),
+    ScaleBody(crate::operations::transform::ScaleBodyParams),
 }
 
 #[cfg(test)]

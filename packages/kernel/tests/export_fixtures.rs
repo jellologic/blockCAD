@@ -21,7 +21,7 @@ use blockcad_kernel::operations::pattern::circular::{CircularPatternParams, circ
 use blockcad_kernel::operations::pattern::linear::LinearPatternParams;
 use blockcad_kernel::operations::pattern::mirror::{MirrorParams, mirror_brep};
 use blockcad_kernel::operations::revolve::RevolveParams;
-use blockcad_kernel::operations::shell::{ShellParams, shell_solid};
+use blockcad_kernel::operations::shell::{ShellDirection, ShellParams, shell_solid};
 use blockcad_kernel::operations::sweep::{sweep_profile, SweepParams};
 use blockcad_kernel::sketch::constraint::{Constraint, ConstraintKind};
 use blockcad_kernel::sketch::entity::{SketchEntity, SketchEntityId};
@@ -157,7 +157,7 @@ fn export_fillet_fixture() {
 fn export_chamfer_fixture() {
     let mut tree = build_sketch_extrude_tree(7.0);
     tree.push(Feature::new("c1".into(), "Chamfer".into(), FeatureKind::Chamfer,
-        FeatureParams::Chamfer(ChamferParams { edge_indices: vec![0], distance: 1.0, distance2: None })));
+        FeatureParams::Chamfer(ChamferParams { edge_indices: vec![0], distance: 1.0, distance2: None, mode: None })));
     let brep = evaluate(&mut tree).unwrap();
     let mesh = tessellate_brep(&brep, &TessellationParams::default()).unwrap();
     let stl = export_stl_binary(&mesh);
@@ -340,7 +340,7 @@ fn export_compound_cut_chamfer_fixture() {
 
     // Feature 2: Chamfer one edge with distance=0.5
     tree.push(Feature::new("ch1".into(), "Chamfer".into(), FeatureKind::Chamfer,
-        FeatureParams::Chamfer(ChamferParams { edge_indices: vec![0], distance: 0.5, distance2: None })));
+        FeatureParams::Chamfer(ChamferParams { edge_indices: vec![0], distance: 0.5, distance2: None, mode: None })));
 
     // Feature 3: Pocket sketch (4x2 rectangle centered in the box)
     tree.push(Feature::new("s2".into(), "Sketch".into(), FeatureKind::Sketch, FeatureParams::Placeholder));
@@ -447,8 +447,7 @@ fn export_shell_fixture() {
         "sh1".into(), "Shell".into(), FeatureKind::Shell,
         FeatureParams::Shell(ShellParams {
             faces_to_remove: vec![1], // Remove top face
-            thickness: 0.5,
-        }),
+            thickness: 0.5, direction: ShellDirection::Inward }),
     ));
     let brep = evaluate(&mut tree).unwrap();
     let mesh = tessellate_brep(&brep, &TessellationParams::default()).unwrap();
@@ -547,7 +546,7 @@ fn export_sweep_fixture() {
         Pt3::new(0.0, 0.0, 0.0),
         Pt3::new(0.0, 0.0, 10.0),
     ).unwrap();
-    let params = SweepParams { segments: Some(10), twist: 0.0 };
+    let params = SweepParams { segments: Some(10), twist: 0.0, ..SweepParams::default() };
 
     let brep = sweep_profile(&profile, &path, &params).unwrap();
     let mesh = tessellate_brep(&brep, &TessellationParams::default()).unwrap();
@@ -679,8 +678,7 @@ fn export_loft_fixture() {
 
     let params = LoftParams {
         slices_per_span: 10,
-        closed: false,
-    };
+        closed: false, ..LoftParams::default() };
 
     let brep = loft_profiles(&[bottom, top], &params).unwrap();
     let mesh = tessellate_brep(&brep, &TessellationParams::default()).unwrap();
@@ -701,8 +699,7 @@ fn export_loft_3section_fixture() {
 
     let params = LoftParams {
         slices_per_span: 10,
-        closed: false,
-    };
+        closed: false, ..LoftParams::default() };
 
     let brep = loft_profiles(&[bottom, middle, top], &params).unwrap();
     let mesh = tessellate_brep(&brep, &TessellationParams::default()).unwrap();
@@ -892,8 +889,7 @@ fn export_compound_fillet_shell_fixture() {
         "sh1".into(), "Shell".into(), FeatureKind::Shell,
         FeatureParams::Shell(ShellParams {
             faces_to_remove: vec![1],
-            thickness: 0.5,
-        }),
+            thickness: 0.5, direction: ShellDirection::Inward }),
     ));
     let brep = evaluate(&mut tree).unwrap();
     let mesh = tessellate_brep(&brep, &TessellationParams::default()).unwrap();
@@ -919,8 +915,7 @@ fn export_revolve_shell_fixture() {
         "sh1".into(), "Shell".into(), FeatureKind::Shell,
         FeatureParams::Shell(ShellParams {
             faces_to_remove: vec![1],
-            thickness: 0.5,
-        }),
+            thickness: 0.5, direction: ShellDirection::Inward }),
     ));
     let brep = evaluate(&mut tree).unwrap();
     let mesh = tessellate_brep(&brep, &TessellationParams::default()).unwrap();
@@ -989,7 +984,7 @@ fn export_stress_box_fillet_chamfer() {
     tree.push(Feature::new("f1".into(), "Fillet".into(), FeatureKind::Fillet,
         FeatureParams::Fillet(FilletParams { edge_indices: vec![0], radius: 1.0 })));
     tree.push(Feature::new("c1".into(), "Chamfer".into(), FeatureKind::Chamfer,
-        FeatureParams::Chamfer(ChamferParams { edge_indices: vec![4], distance: 0.5, distance2: None })));
+        FeatureParams::Chamfer(ChamferParams { edge_indices: vec![4], distance: 0.5, distance2: None, mode: None })));
     let brep = evaluate(&mut tree).unwrap();
     let mesh = tessellate_brep(&brep, &TessellationParams::default()).unwrap();
     let stl = export_stl_binary(&mesh);
@@ -1012,8 +1007,7 @@ fn export_stress_box_shell_draft() {
         "sh1".into(), "Shell".into(), FeatureKind::Shell,
         FeatureParams::Shell(ShellParams {
             faces_to_remove: vec![1], // top face
-            thickness: 0.5,
-        }),
+            thickness: 0.5, direction: ShellDirection::Inward }),
     ));
 
     // Draft: apply 5 deg draft to 2 side faces along Z pull direction
@@ -1099,8 +1093,7 @@ fn export_stress_box_pattern_shell_fixture() {
         "sh1".into(), "Shell".into(), FeatureKind::Shell,
         FeatureParams::Shell(ShellParams {
             faces_to_remove: vec![1], // Remove top face
-            thickness: 0.3,
-        }),
+            thickness: 0.3, direction: ShellDirection::Inward }),
     ));
     let brep = evaluate(&mut tree).unwrap();
     let mesh = tessellate_brep(&brep, &TessellationParams::default()).unwrap();
@@ -1122,8 +1115,7 @@ fn export_stress_loft_mirror_fixture() {
 
     let loft_params = LoftParams {
         slices_per_span: 10,
-        closed: false,
-    };
+        closed: false, ..LoftParams::default() };
 
     let loft_brep = loft_profiles(&[bottom, top], &loft_params).unwrap();
 
@@ -1165,7 +1157,7 @@ fn export_stress_sweep_pattern_fixture() {
         Pt3::new(0.0, 0.0, 0.0),
         Pt3::new(0.0, 0.0, 10.0),
     ).unwrap();
-    let params = SweepParams { segments: Some(10), twist: 0.0 };
+    let params = SweepParams { segments: Some(10), twist: 0.0, ..SweepParams::default() };
 
     let sweep_brep = sweep_profile(&profile, &path, &params).unwrap();
 
@@ -1248,8 +1240,7 @@ fn export_stress_box_boolean_shell_fixture() {
 
     let shell_params = ShellParams {
         faces_to_remove: vec![top_face_idx],
-        thickness: 0.5,
-    };
+        thickness: 0.5, direction: ShellDirection::Inward };
     let shelled = shell_solid(&union_brep, &shell_params).unwrap();
 
     let mesh = tessellate_brep(&shelled, &TessellationParams::default()).unwrap();
@@ -1274,8 +1265,7 @@ fn export_l_shape_shell_fixture() {
         "sh1".into(), "Shell".into(), FeatureKind::Shell,
         FeatureParams::Shell(ShellParams {
             faces_to_remove: vec![1], // Remove top face
-            thickness: 0.5,
-        }),
+            thickness: 0.5, direction: ShellDirection::Inward }),
     ));
 
     let brep = evaluate(&mut tree).unwrap();
@@ -1299,7 +1289,7 @@ fn export_cylinder_chamfer_fixture() {
     tree.push(Feature::new("e1".into(), "Extrude".into(), FeatureKind::Extrude,
         FeatureParams::Extrude(ExtrudeParams::blind(Vec3::new(0.0, 0.0, 1.0), 10.0))));
     tree.push(Feature::new("ch1".into(), "Chamfer".into(), FeatureKind::Chamfer,
-        FeatureParams::Chamfer(ChamferParams { edge_indices: vec![0], distance: 0.5, distance2: None })));
+        FeatureParams::Chamfer(ChamferParams { edge_indices: vec![0], distance: 0.5, distance2: None, mode: None })));
     let brep = evaluate(&mut tree).unwrap();
     let mesh = tessellate_brep(&brep, &TessellationParams::default()).unwrap();
     let stl = export_stl_binary(&mesh);
@@ -1345,8 +1335,7 @@ fn export_stress_thin_shell_fixture() {
         "sh1".into(), "Shell".into(), FeatureKind::Shell,
         FeatureParams::Shell(ShellParams {
             faces_to_remove: vec![1], // top face
-            thickness: 0.2,
-        }),
+            thickness: 0.2, direction: ShellDirection::Inward }),
     ));
 
     let brep = evaluate(&mut tree).unwrap();
@@ -1388,8 +1377,7 @@ fn export_stress_asymmetric_chamfer_fixture() {
         FeatureParams::Chamfer(ChamferParams {
             edge_indices: vec![0],
             distance: 1.0,
-            distance2: Some(0.5),
-        }),
+            distance2: Some(0.5), mode: None }),
     ));
     let brep = evaluate(&mut tree).unwrap();
     let mesh = tessellate_brep(&brep, &TessellationParams::default()).unwrap();
@@ -1486,8 +1474,7 @@ fn export_stress_multi_face_shell_fixture() {
         "sh1".into(), "Shell".into(), FeatureKind::Shell,
         FeatureParams::Shell(ShellParams {
             faces_to_remove: vec![1, 2], // top face + front face
-            thickness: 0.5,
-        }),
+            thickness: 0.5, direction: ShellDirection::Inward }),
     ));
 
     let brep = evaluate(&mut tree).unwrap();
@@ -1521,8 +1508,7 @@ fn export_stress_thick_shell() {
 
     let shell_params = ShellParams {
         faces_to_remove: vec![top_face_idx],
-        thickness: 4.0,
-    };
+        thickness: 4.0, direction: ShellDirection::Inward };
     let shelled = shell_solid(&box_brep, &shell_params).unwrap();
 
     let mesh = tessellate_brep(&shelled, &TessellationParams::default()).unwrap();
@@ -1764,7 +1750,7 @@ fn export_stress_revolve_cut_chamfer_fixture() {
 
     // Step 3: Chamfer edge 0 with d=0.5
     tree.push(Feature::new("ch1".into(), "Chamfer".into(), FeatureKind::Chamfer,
-        FeatureParams::Chamfer(ChamferParams { edge_indices: vec![0], distance: 0.5, distance2: None })));
+        FeatureParams::Chamfer(ChamferParams { edge_indices: vec![0], distance: 0.5, distance2: None, mode: None })));
 
     // Chamfer should now succeed on revolved bodies
     let brep = evaluate(&mut tree).expect("Revolve+cut+chamfer should succeed");
@@ -1822,8 +1808,7 @@ fn export_stress_full_part_1_fixture() {
         "sh1".into(), "Shell".into(), FeatureKind::Shell,
         FeatureParams::Shell(ShellParams {
             faces_to_remove: vec![1],
-            thickness: 0.5,
-        }),
+            thickness: 0.5, direction: ShellDirection::Inward }),
     ));
 
     let brep = evaluate(&mut tree).unwrap();
@@ -1862,7 +1847,7 @@ fn export_stress_full_part_2_fixture() {
 
     // Chamfer edge 0 with d=0.5
     tree.push(Feature::new("c1".into(), "Chamfer".into(), FeatureKind::Chamfer,
-        FeatureParams::Chamfer(ChamferParams { edge_indices: vec![0], distance: 0.5, distance2: None })));
+        FeatureParams::Chamfer(ChamferParams { edge_indices: vec![0], distance: 0.5, distance2: None, mode: None })));
 
     // Mirror across YZ plane at x=0
     tree.push(Feature::new("m1".into(), "Mirror".into(), FeatureKind::Mirror,
@@ -1913,8 +1898,7 @@ fn export_stress_full_part_3_fixture() {
     tree.push(Feature::new("sh1".into(), "Shell".into(), FeatureKind::Shell,
         FeatureParams::Shell(ShellParams {
             faces_to_remove: vec![1],
-            thickness: 0.5,
-        })));
+            thickness: 0.5, direction: ShellDirection::Inward })));
 
     // Fillet edge 0 with r=0.3
     tree.push(Feature::new("f1".into(), "Fillet".into(), FeatureKind::Fillet,
@@ -2008,8 +1992,7 @@ fn export_stress_loft_fillet_fixture() {
 
     let loft_params = LoftParams {
         slices_per_span: 10,
-        closed: false,
-    };
+        closed: false, ..LoftParams::default() };
 
     let loft_brep = loft_profiles(&[bottom, middle, top], &loft_params).unwrap();
 
@@ -2074,7 +2057,7 @@ fn export_stress_sweep_shell_fixture() {
         Pt3::new(0.0, 0.0, 0.0),
         Pt3::new(0.0, 0.0, 10.0),
     ).unwrap();
-    let sweep_params = SweepParams { segments: Some(10), twist: 0.0 };
+    let sweep_params = SweepParams { segments: Some(10), twist: 0.0, ..SweepParams::default() };
 
     let sweep_brep = sweep_profile(&profile, &path, &sweep_params).unwrap();
 
@@ -2088,8 +2071,7 @@ fn export_stress_sweep_shell_fixture() {
 
     let shell_params = ShellParams {
         faces_to_remove: vec![top_face_idx],
-        thickness: 0.3,
-    };
+        thickness: 0.3, direction: ShellDirection::Inward };
     let shelled = shell_solid(&sweep_brep, &shell_params).unwrap();
 
     let mesh = tessellate_brep(&shelled, &TessellationParams::default()).unwrap();
@@ -2115,14 +2097,13 @@ fn export_stress_box_5ops_fixture() {
 
     // Chamfer edge 4 with d=0.3
     tree.push(Feature::new("c1".into(), "Chamfer".into(), FeatureKind::Chamfer,
-        FeatureParams::Chamfer(ChamferParams { edge_indices: vec![4], distance: 0.3, distance2: None })));
+        FeatureParams::Chamfer(ChamferParams { edge_indices: vec![4], distance: 0.3, distance2: None, mode: None })));
 
     // Shell: remove top face, thickness 0.4
     tree.push(Feature::new("sh1".into(), "Shell".into(), FeatureKind::Shell,
         FeatureParams::Shell(ShellParams {
             faces_to_remove: vec![1],
-            thickness: 0.4,
-        })));
+            thickness: 0.4, direction: ShellDirection::Inward })));
 
     // Draft: 2 side faces, 3 degrees
     tree.push(Feature::new("d1".into(), "Draft".into(), FeatureKind::Draft,
@@ -2215,8 +2196,7 @@ fn export_stress_circular_shell_fixture() {
     tree.push(Feature::new("sh1".into(), "Shell".into(), FeatureKind::Shell,
         FeatureParams::Shell(ShellParams {
             faces_to_remove: vec![1], // Remove top face
-            thickness: 0.3,
-        })));
+            thickness: 0.3, direction: ShellDirection::Inward })));
 
     let brep = evaluate(&mut tree).unwrap();
     let mesh = tessellate_brep(&brep, &TessellationParams::default()).unwrap();
@@ -2304,8 +2284,7 @@ fn export_stress_boolean_fillet_shell_fixture() {
 
     let shell_params = ShellParams {
         faces_to_remove: vec![top_face_idx],
-        thickness: 0.5,
-    };
+        thickness: 0.5, direction: ShellDirection::Inward };
     let shelled = shell_solid(&filleted, &shell_params).unwrap();
 
     let params = TessellationParams::default();

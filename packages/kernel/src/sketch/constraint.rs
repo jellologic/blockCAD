@@ -31,6 +31,8 @@ pub enum ConstraintKind {
     Equal,
 
     // Advanced geometric constraints
+    /// Two arcs/circles share the same center point.
+    Concentric,
     /// Two arcs/circles share the same center and radius.
     Coradial,
     /// A point lies on a line or arc/circle curve.

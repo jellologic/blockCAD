@@ -69,10 +69,16 @@ export interface FilletParams {
   radius: number;
 }
 
+export type ChamferMode =
+  | { type: "equal_distance"; distance: number }
+  | { type: "two_distance"; distance1: number; distance2: number }
+  | { type: "angle_distance"; distance: number; angle: number };
+
 export interface ChamferParams {
   edge_indices: number[];
   distance: number;
   distance2?: number;
+  mode?: ChamferMode;
 }
 
 export interface LinearPatternParams {

@@ -13,7 +13,7 @@ use blockcad_kernel::operations::extrude::ExtrudeParams;
 use blockcad_kernel::operations::revolve::RevolveParams;
 use blockcad_kernel::operations::fillet::FilletParams;
 use blockcad_kernel::operations::chamfer::ChamferParams;
-use blockcad_kernel::operations::shell::ShellParams;
+use blockcad_kernel::operations::shell::{ShellDirection, ShellParams};
 use blockcad_kernel::operations::pattern::linear::LinearPatternParams;
 use blockcad_kernel::operations::pattern::mirror::MirrorParams;
 use blockcad_kernel::sketch::constraint::{Constraint, ConstraintKind};
@@ -330,7 +330,7 @@ fn stress_shell_volume_hollow() {
     // (approximate — inner dimensions depend on shell algorithm)
     let mut tree = sketch_extrude(10.0, 10.0, 10.0);
     tree.push(Feature::new("sh".into(), "Shell".into(), FeatureKind::Shell,
-        FeatureParams::Shell(ShellParams { faces_to_remove: vec![1], thickness: 1.0 })));
+        FeatureParams::Shell(ShellParams { faces_to_remove: vec![1], thickness: 1.0, direction: ShellDirection::Inward })));
     let mesh = eval_and_mesh(&mut tree);
     validate_mesh(&mesh, "shell_hollow");
 
@@ -425,7 +425,7 @@ fn stress_chamfer_preserves_watertight_volume() {
     // Chamfer removes a triangular prism from one edge
     let mut tree = sketch_extrude(10.0, 5.0, 7.0);
     tree.push(Feature::new("ch".into(), "Ch".into(), FeatureKind::Chamfer,
-        FeatureParams::Chamfer(ChamferParams { edge_indices: vec![0], distance: 1.0, distance2: None })));
+        FeatureParams::Chamfer(ChamferParams { edge_indices: vec![0], distance: 1.0, distance2: None, mode: None })));
     let mesh = eval_and_mesh(&mut tree);
     validate_mesh(&mesh, "chamfer");
 

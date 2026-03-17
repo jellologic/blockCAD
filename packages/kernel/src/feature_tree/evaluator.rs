@@ -544,6 +544,94 @@ pub fn evaluate(tree: &mut FeatureTree) -> KernelResult<BRep> {
                 tree.features_mut()[i].state = FeatureState::Evaluated;
             }
 
+            FeatureKind::VariableFillet => {
+                let params = match &tree.features()[i].params {
+                    FeatureParams::VariableFillet(p) => p.clone(),
+                    _ => {
+                        tree.features_mut()[i].state = FeatureState::Failed;
+                        return Err(KernelError::Operation {
+                            op: "evaluate".into(),
+                            detail: "VariableFillet feature has wrong params type".into(),
+                        });
+                    }
+                };
+                if matches!(current_brep.body, Body::Empty) {
+                    tree.features_mut()[i].state = FeatureState::Failed;
+                    return Err(KernelError::Operation {
+                        op: "evaluate".into(),
+                        detail: "Cannot variable fillet: no existing geometry".into(),
+                    });
+                }
+                current_brep = crate::operations::fillet::variable_fillet_edges(&current_brep, &params)?;
+                tree.features_mut()[i].state = FeatureState::Evaluated;
+            }
+
+            FeatureKind::FaceFillet => {
+                let params = match &tree.features()[i].params {
+                    FeatureParams::FaceFillet(p) => p.clone(),
+                    _ => {
+                        tree.features_mut()[i].state = FeatureState::Failed;
+                        return Err(KernelError::Operation {
+                            op: "evaluate".into(),
+                            detail: "FaceFillet feature has wrong params type".into(),
+                        });
+                    }
+                };
+                if matches!(current_brep.body, Body::Empty) {
+                    tree.features_mut()[i].state = FeatureState::Failed;
+                    return Err(KernelError::Operation {
+                        op: "evaluate".into(),
+                        detail: "Cannot face fillet: no existing geometry".into(),
+                    });
+                }
+                current_brep = crate::operations::fillet::face_fillet(&current_brep, &params)?;
+                tree.features_mut()[i].state = FeatureState::Evaluated;
+            }
+
+            FeatureKind::MoveBody => {
+                let params = match &tree.features()[i].params {
+                    FeatureParams::MoveBody(p) => p.clone(),
+                    _ => {
+                        tree.features_mut()[i].state = FeatureState::Failed;
+                        return Err(KernelError::Operation {
+                            op: "evaluate".into(),
+                            detail: "MoveBody feature has wrong params type".into(),
+                        });
+                    }
+                };
+                if matches!(current_brep.body, Body::Empty) {
+                    tree.features_mut()[i].state = FeatureState::Failed;
+                    return Err(KernelError::Operation {
+                        op: "evaluate".into(),
+                        detail: "Cannot move/copy: no existing geometry".into(),
+                    });
+                }
+                current_brep = crate::operations::transform_body::move_body(&current_brep, &params)?;
+                tree.features_mut()[i].state = FeatureState::Evaluated;
+            }
+
+            FeatureKind::ScaleBody => {
+                let params = match &tree.features()[i].params {
+                    FeatureParams::ScaleBody(p) => p.clone(),
+                    _ => {
+                        tree.features_mut()[i].state = FeatureState::Failed;
+                        return Err(KernelError::Operation {
+                            op: "evaluate".into(),
+                            detail: "ScaleBody feature has wrong params type".into(),
+                        });
+                    }
+                };
+                if matches!(current_brep.body, Body::Empty) {
+                    tree.features_mut()[i].state = FeatureState::Failed;
+                    return Err(KernelError::Operation {
+                        op: "evaluate".into(),
+                        detail: "Cannot scale: no existing geometry".into(),
+                    });
+                }
+                current_brep = crate::operations::transform::scale_body(&current_brep, &params)?;
+                tree.features_mut()[i].state = FeatureState::Evaluated;
+            }
+
             other => {
                 tree.features_mut()[i].state = FeatureState::Failed;
                 return Err(KernelError::Operation {

@@ -14,7 +14,7 @@ use blockcad_kernel::operations::pattern::circular::CircularPatternParams;
 use blockcad_kernel::operations::pattern::linear::LinearPatternParams;
 use blockcad_kernel::operations::pattern::mirror::MirrorParams;
 use blockcad_kernel::operations::revolve::RevolveParams;
-use blockcad_kernel::operations::shell::ShellParams;
+use blockcad_kernel::operations::shell::{ShellDirection, ShellParams};
 use blockcad_kernel::sketch::constraint::{Constraint, ConstraintKind};
 use blockcad_kernel::sketch::entity::SketchEntity;
 use blockcad_kernel::sketch::Sketch;
@@ -69,7 +69,7 @@ fn e2e_extrude_produces_valid_mesh() {
 fn e2e_extrude_then_chamfer() {
     let mut tree = build_sketch_extrude_tree(7.0);
     tree.push(Feature::new("ch1".into(), "Chamfer".into(), FeatureKind::Chamfer,
-        FeatureParams::Chamfer(ChamferParams { edge_indices: vec![0], distance: 1.0, distance2: None })));
+        FeatureParams::Chamfer(ChamferParams { edge_indices: vec![0], distance: 1.0, distance2: None, mode: None })));
     let brep = evaluate(&mut tree).unwrap();
     assert_eq!(brep.faces.len(), 7); // 6 + 1 chamfer face
     assert!(matches!(brep.body, Body::Solid(_)));
@@ -223,7 +223,7 @@ fn e2e_extrude_then_cut_extrude() {
 fn e2e_extrude_then_shell() {
     let mut tree = build_sketch_extrude_tree(7.0);
     tree.push(Feature::new("sh1".into(), "Shell".into(), FeatureKind::Shell,
-        FeatureParams::Shell(ShellParams { faces_to_remove: vec![1], thickness: 1.0 })));
+        FeatureParams::Shell(ShellParams { faces_to_remove: vec![1], thickness: 1.0, direction: ShellDirection::Inward })));
     let brep = evaluate(&mut tree).unwrap();
     // 5 outer + 5 inner + 4 rim = 14
     assert_eq!(brep.faces.len(), 14, "Shell should produce 14 faces, got {}", brep.faces.len());
@@ -340,7 +340,7 @@ fn chamfer_reduces_volume() {
     let mut tree = build_sketch_extrude_tree(7.0);
     tree.push(Feature::new(
         "c1".into(), "Chamfer".into(), FeatureKind::Chamfer,
-        FeatureParams::Chamfer(ChamferParams { edge_indices: vec![0], distance: 1.0, distance2: None }),
+        FeatureParams::Chamfer(ChamferParams { edge_indices: vec![0], distance: 1.0, distance2: None, mode: None }),
     ));
     let brep = evaluate(&mut tree).unwrap();
     let mesh = tessellate_brep(&brep, &TessellationParams::default()).unwrap();

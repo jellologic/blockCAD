@@ -1,8 +1,8 @@
 use crate::error::{KernelError, KernelResult};
 use crate::solver::equations::{
-    AngleEquation, CoincidentEquation, CollinearEquation, DistanceEquation, EqualLengthEquation,
-    FixedEquation, MidpointEquation, ParallelEquation, PerpendicularEquation,
-    PointOnCircleEquation, PointOnLineEquation, RadiusEquation,
+    AngleEquation, CoincidentEquation, CollinearEquation, ConcentricEquation, DistanceEquation,
+    EqualLengthEquation, FixedEquation, MidpointEquation, ParallelEquation,
+    PerpendicularEquation, PointOnCircleEquation, PointOnLineEquation, RadiusEquation,
     SymmetricMidpointEquation, SymmetricPerpendicularEquation, TangentLineCircleEquation,
 };
 use crate::solver::graph::ConstraintGraph;
@@ -344,6 +344,38 @@ pub fn build_constraint_graph(sketch: &Sketch) -> KernelResult<(ConstraintGraph,
                     }
                     _ => {} // Unsupported entity combination
                 }
+            }
+
+            ConstraintKind::Concentric => {
+                // Two circles/arcs share the same center point.
+                let e1 = sketch.entities.get(constraint.entities[0])?;
+                let e2 = sketch.entities.get(constraint.entities[1])?;
+                let c1 = match e1 {
+                    SketchEntity::Circle { center, .. } => *center,
+                    SketchEntity::Arc { center, .. } => *center,
+                    _ => {
+                        return Err(KernelError::Internal(
+                            "Concentric: entity 0 is not a circle or arc".into(),
+                        ))
+                    }
+                };
+                let c2 = match e2 {
+                    SketchEntity::Circle { center, .. } => *center,
+                    SketchEntity::Arc { center, .. } => *center,
+                    _ => {
+                        return Err(KernelError::Internal(
+                            "Concentric: entity 1 is not a circle or arc".into(),
+                        ))
+                    }
+                };
+                let (cx1, cy1) = var_map.point_vars(c1).ok_or_else(|| {
+                    KernelError::Internal("Concentric: center1 not a point".into())
+                })?;
+                let (cx2, cy2) = var_map.point_vars(c2).ok_or_else(|| {
+                    KernelError::Internal("Concentric: center2 not a point".into())
+                })?;
+                graph.add_equation(Box::new(ConcentricEquation::new(cx1, cx2)));
+                graph.add_equation(Box::new(ConcentricEquation::new(cy1, cy2)));
             }
 
             ConstraintKind::Coradial => {
@@ -988,5 +1020,238 @@ mod tests {
             (cy.abs() - r).abs() < 1e-6,
             "Perpendicular distance from center to line should equal radius: |cy|={}, r={}", cy.abs(), r
         );
+    }
+
+    // --- Concentric constraint tests ---
+
+    #[test]
+    fn test_concentric_two_circles() {
+        // Two circles with different centers should converge to same center.
+        let mut sketch = Sketch::new(Plane::xy(0.0));
+
+        let c1_center = sketch.add_entity(SketchEntity::Point {
+            position: Pt2::new(1.0, 2.0),
+        });
+        let circle1 = sketch.add_entity(SketchEntity::Circle {
+            center: c1_center,
+            radius: 3.0,
+        });
+
+        let c2_center = sketch.add_entity(SketchEntity::Point {
+            position: Pt2::new(4.0, 6.0),
+        });
+        let circle2 = sketch.add_entity(SketchEntity::Circle {
+            center: c2_center,
+            radius: 5.0,
+        });
+
+        // Fix circle1's center so the solver has an anchor
+        sketch.add_constraint(Constraint::new(ConstraintKind::Fixed, vec![c1_center]));
+        // Fix radii so they don't drift during solving
+        sketch.add_constraint(Constraint::new(
+            ConstraintKind::Radius { value: 3.0 },
+            vec![circle1],
+        ));
+        sketch.add_constraint(Constraint::new(
+            ConstraintKind::Radius { value: 5.0 },
+            vec![circle2],
+        ));
+        // Concentric: circles must share center
+        sketch.add_constraint(Constraint::new(
+            ConstraintKind::Concentric,
+            vec![circle1, circle2],
+        ));
+
+        let (mut graph, var_map) = build_constraint_graph(&sketch).unwrap();
+
+        // Concentric produces 2 equations (cx, cy) + Fixed produces 2 + 2 Radius = total 6
+        assert_eq!(graph.equation_count(), 6);
+
+        let result = solve(&mut graph, &SolverConfig::default()).unwrap();
+        assert!(result.converged, "Solver should converge for concentric circles");
+
+        let (cx1, cy1) = var_map.point_vars(c1_center).unwrap();
+        let (cx2, cy2) = var_map.point_vars(c2_center).unwrap();
+
+        // Centers should match
+        assert!(
+            (graph.variables.value(cx1) - graph.variables.value(cx2)).abs() < 1e-6,
+            "X centers should match"
+        );
+        assert!(
+            (graph.variables.value(cy1) - graph.variables.value(cy2)).abs() < 1e-6,
+            "Y centers should match"
+        );
+
+        // Radii should remain different (concentric != coradial)
+        let r1 = var_map.circle_radius_var(circle1).unwrap();
+        let r2 = var_map.circle_radius_var(circle2).unwrap();
+        assert!(
+            (graph.variables.value(r1) - 3.0).abs() < 1e-6,
+            "Circle1 radius should stay 3.0"
+        );
+        assert!(
+            (graph.variables.value(r2) - 5.0).abs() < 1e-6,
+            "Circle2 radius should stay 5.0"
+        );
+    }
+
+    #[test]
+    fn test_concentric_circle_and_arc() {
+        // A circle and an arc with different centers should converge to same center.
+        let mut sketch = Sketch::new(Plane::xy(0.0));
+
+        let c_center = sketch.add_entity(SketchEntity::Point {
+            position: Pt2::new(0.0, 0.0),
+        });
+        let circle = sketch.add_entity(SketchEntity::Circle {
+            center: c_center,
+            radius: 5.0,
+        });
+
+        let a_center = sketch.add_entity(SketchEntity::Point {
+            position: Pt2::new(1.0, 1.0),
+        });
+        let a_start = sketch.add_entity(SketchEntity::Point {
+            position: Pt2::new(3.0, 0.0),
+        });
+        let a_end = sketch.add_entity(SketchEntity::Point {
+            position: Pt2::new(0.0, 3.0),
+        });
+        let arc = sketch.add_entity(SketchEntity::Arc {
+            center: a_center,
+            start: a_start,
+            end: a_end,
+        });
+
+        // Fix circle center and radius
+        sketch.add_constraint(Constraint::new(ConstraintKind::Fixed, vec![c_center]));
+        sketch.add_constraint(Constraint::new(
+            ConstraintKind::Radius { value: 5.0 },
+            vec![circle],
+        ));
+        // Fix arc start and end points so the system is well-determined
+        sketch.add_constraint(Constraint::new(ConstraintKind::Fixed, vec![a_start]));
+        sketch.add_constraint(Constraint::new(ConstraintKind::Fixed, vec![a_end]));
+        // Concentric
+        sketch.add_constraint(Constraint::new(
+            ConstraintKind::Concentric,
+            vec![circle, arc],
+        ));
+
+        let (mut graph, var_map) = build_constraint_graph(&sketch).unwrap();
+        let result = solve(&mut graph, &SolverConfig::default()).unwrap();
+        assert!(result.converged, "Solver should converge for concentric circle+arc");
+
+        let (cx, cy) = var_map.point_vars(c_center).unwrap();
+        let (ax, ay) = var_map.point_vars(a_center).unwrap();
+
+        assert!(
+            (graph.variables.value(cx) - graph.variables.value(ax)).abs() < 1e-6,
+            "X centers should match"
+        );
+        assert!(
+            (graph.variables.value(cy) - graph.variables.value(ay)).abs() < 1e-6,
+            "Y centers should match"
+        );
+    }
+
+    #[test]
+    fn test_concentric_already_concentric() {
+        // Two circles already sharing the same center position -- solver should converge trivially.
+        let mut sketch = Sketch::new(Plane::xy(0.0));
+
+        let c1_center = sketch.add_entity(SketchEntity::Point {
+            position: Pt2::new(5.0, 5.0),
+        });
+        let circle1 = sketch.add_entity(SketchEntity::Circle {
+            center: c1_center,
+            radius: 2.0,
+        });
+
+        let c2_center = sketch.add_entity(SketchEntity::Point {
+            position: Pt2::new(5.0, 5.0),
+        });
+        let circle2 = sketch.add_entity(SketchEntity::Circle {
+            center: c2_center,
+            radius: 7.0,
+        });
+
+        // Fix circle1 center
+        sketch.add_constraint(Constraint::new(ConstraintKind::Fixed, vec![c1_center]));
+        // Concentric
+        sketch.add_constraint(Constraint::new(
+            ConstraintKind::Concentric,
+            vec![circle1, circle2],
+        ));
+
+        let (mut graph, var_map) = build_constraint_graph(&sketch).unwrap();
+        let result = solve(&mut graph, &SolverConfig::default()).unwrap();
+        assert!(result.converged, "Already-concentric should converge immediately");
+        assert!(result.iterations <= 2, "Should converge in 1-2 iterations, took {}", result.iterations);
+
+        let (cx1, cy1) = var_map.point_vars(c1_center).unwrap();
+        let (cx2, cy2) = var_map.point_vars(c2_center).unwrap();
+        assert!((graph.variables.value(cx1) - 5.0).abs() < 1e-6);
+        assert!((graph.variables.value(cy1) - 5.0).abs() < 1e-6);
+        assert!((graph.variables.value(cx2) - 5.0).abs() < 1e-6);
+        assert!((graph.variables.value(cy2) - 5.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_concentric_with_radius_constraints() {
+        // Two circles: concentric + each has a radius constraint.
+        let mut sketch = Sketch::new(Plane::xy(0.0));
+
+        let c1_center = sketch.add_entity(SketchEntity::Point {
+            position: Pt2::new(0.0, 0.0),
+        });
+        let circle1 = sketch.add_entity(SketchEntity::Circle {
+            center: c1_center,
+            radius: 2.5,
+        });
+
+        let c2_center = sketch.add_entity(SketchEntity::Point {
+            position: Pt2::new(3.0, 4.0),
+        });
+        let circle2 = sketch.add_entity(SketchEntity::Circle {
+            center: c2_center,
+            radius: 8.0,
+        });
+
+        // Fix circle1 center at origin
+        sketch.add_constraint(Constraint::new(ConstraintKind::Fixed, vec![c1_center]));
+        // Radius constraints
+        sketch.add_constraint(Constraint::new(
+            ConstraintKind::Radius { value: 3.0 },
+            vec![circle1],
+        ));
+        sketch.add_constraint(Constraint::new(
+            ConstraintKind::Radius { value: 7.0 },
+            vec![circle2],
+        ));
+        // Concentric
+        sketch.add_constraint(Constraint::new(
+            ConstraintKind::Concentric,
+            vec![circle1, circle2],
+        ));
+
+        let (mut graph, var_map) = build_constraint_graph(&sketch).unwrap();
+        let result = solve(&mut graph, &SolverConfig::default()).unwrap();
+        assert!(result.converged, "Concentric + radius constraints should converge");
+
+        // Both centers at origin
+        let (cx1, cy1) = var_map.point_vars(c1_center).unwrap();
+        let (cx2, cy2) = var_map.point_vars(c2_center).unwrap();
+        assert!((graph.variables.value(cx1) - 0.0).abs() < 1e-6);
+        assert!((graph.variables.value(cy1) - 0.0).abs() < 1e-6);
+        assert!((graph.variables.value(cx2) - 0.0).abs() < 1e-6);
+        assert!((graph.variables.value(cy2) - 0.0).abs() < 1e-6);
+
+        // Radii should be the constrained values
+        let r1 = var_map.circle_radius_var(circle1).unwrap();
+        let r2 = var_map.circle_radius_var(circle2).unwrap();
+        assert!((graph.variables.value(r1) - 3.0).abs() < 1e-6);
+        assert!((graph.variables.value(r2) - 7.0).abs() < 1e-6);
     }
 }

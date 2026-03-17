@@ -657,6 +657,10 @@ impl Equation for SymmetricPerpendicularEquation {
     }
 }
 
+/// Concentric constraint (single axis): cx1 - cx2 = 0
+/// Used in pairs (one for x, one for y) to force two circles/arcs to share the same center.
+pub type ConcentricEquation = CoincidentEquation;
+
 /// Point-on-line constraint: point (px, py) lies on line from (ax, ay) to (bx, by).
 /// Uses the cross product form: (bx-ax)*(py-ay) - (by-ay)*(px-ax) = 0
 /// This is equivalent to CollinearEquation but named for clarity.

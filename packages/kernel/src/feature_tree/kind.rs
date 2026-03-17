@@ -29,6 +29,12 @@ pub enum FeatureKind {
     CircularPattern,
     Mirror,
 
+    // New operations (Batch 2)
+    VariableFillet,
+    FaceFillet,
+    MoveBody,
+    ScaleBody,
+
     // Reference geometry
     DatumPlane,
 }
@@ -53,6 +59,10 @@ impl FeatureKind {
             FeatureKind::LinearPattern => "Linear Pattern",
             FeatureKind::CircularPattern => "Circular Pattern",
             FeatureKind::Mirror => "Mirror",
+            FeatureKind::VariableFillet => "Variable Fillet",
+            FeatureKind::FaceFillet => "Face Fillet",
+            FeatureKind::MoveBody => "Move/Copy Body",
+            FeatureKind::ScaleBody => "Scale Body",
             FeatureKind::DatumPlane => "Datum Plane",
         }
     }
@@ -93,6 +103,10 @@ mod tests {
         assert!(!FeatureKind::CircularPattern.requires_server());
         assert!(!FeatureKind::Mirror.requires_server());
         assert!(!FeatureKind::Shell.requires_server());
+        assert!(!FeatureKind::VariableFillet.requires_server());
+        assert!(!FeatureKind::FaceFillet.requires_server());
+        assert!(!FeatureKind::MoveBody.requires_server());
+        assert!(!FeatureKind::ScaleBody.requires_server());
     }
 
     #[test]
