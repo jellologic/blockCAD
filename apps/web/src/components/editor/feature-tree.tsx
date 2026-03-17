@@ -259,7 +259,7 @@ export function FeatureTree() {
                   isSelected
                     ? "bg-[var(--cad-accent)]/15 text-[var(--cad-accent)]"
                     : "text-[var(--cad-text-secondary)] hover:bg-white/5 hover:text-[var(--cad-text-primary)]"
-                } ${isSuppressed ? "opacity-40" : ""}`}
+                } ${isSuppressed ? "opacity-40 line-through" : ""}`}
               >
                 <StatusDot suppressed={isSuppressed} />
                 <FeatureIcon

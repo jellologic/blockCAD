@@ -18,8 +18,20 @@ export interface MeshData {
 
 /**
  * Parse a raw byte buffer from the kernel into structured MeshData.
- * Layout: [vertex_count: u32, positions: f32[], normals: f32[],
- *          uvs: f32[], triangle_count: u32, indices: u32[]]
+ *
+ * Rust serialization layout (TriMesh::to_bytes):
+ *   [vertex_count: u32]
+ *   [positions: f32 × vc×3]
+ *   [normals:   f32 × vc×3]
+ *   [uvs:       f32 × vc×2]
+ *   [triangle_count: u32]
+ *   [indices:   u32 × tc×3]
+ *   [face_ids:  u32 × tc]
+ *
+ * Edge data is NOT included in the current Rust serialization.
+ * If additional bytes remain after face_ids, they are parsed as:
+ *   [edge_count: u32]
+ *   [edge_positions: f32 × ec×6]
  */
 export function parseMeshBytes(buffer: ArrayBuffer): MeshData {
   const view = new DataView(buffer);
@@ -46,10 +58,16 @@ export function parseMeshBytes(buffer: ArrayBuffer): MeshData {
   const faceIds = new Uint32Array(buffer, offset, triangleCount);
   offset += triangleCount * 4;
 
-  const edgeCount = view.getUint32(offset, true);
-  offset += 4;
-
-  const edgePositions = new Float32Array(buffer, offset, edgeCount * 6);
+  // Edge data is optional — only present if bytes remain
+  let edgeCount = 0;
+  let edgePositions = new Float32Array(0);
+  if (offset + 4 <= buffer.byteLength) {
+    edgeCount = view.getUint32(offset, true);
+    offset += 4;
+    if (edgeCount > 0 && offset + edgeCount * 6 * 4 <= buffer.byteLength) {
+      edgePositions = new Float32Array(buffer, offset, edgeCount * 6);
+    }
+  }
 
   return {
     positions,

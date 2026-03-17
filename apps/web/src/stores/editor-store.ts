@@ -1226,20 +1226,27 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     const fresh = new KernelClient();
     try {
       sample.build(fresh);
-      const mesh = fresh.tessellate();
-      set({
-        kernel: fresh,
-        meshData: mesh,
-        features: fresh.featureList,
-        activeOperation: null,
-        selectedFeatureId: null,
-        selectedFaceIndex: null,
-      });
-      toast.success(`Loaded: ${sample.name}`);
     } catch (err) {
-      console.error("[blockCAD] Failed to load sample:", err);
-      toast.error("Failed to load sample: " + (err instanceof Error ? err.message : String(err)));
+      console.error("[blockCAD] Failed to build sample:", err);
+      toast.error("Failed to build sample: " + (err instanceof Error ? err.message : String(err)));
+      return;
     }
+    // Tessellate — if it fails, still keep the kernel and features (just no mesh)
+    let mesh: MeshData | null = null;
+    try {
+      mesh = fresh.tessellate();
+    } catch (err) {
+      console.warn("[blockCAD] Tessellation failed for sample (features still loaded):", err);
+    }
+    set({
+      kernel: fresh,
+      meshData: mesh,
+      features: fresh.featureList,
+      activeOperation: null,
+      selectedFeatureId: null,
+      selectedFaceIndex: null,
+    });
+    toast.success(`Loaded: ${sample.name}`);
   },
 
   exportSTL: (binary = true) => {

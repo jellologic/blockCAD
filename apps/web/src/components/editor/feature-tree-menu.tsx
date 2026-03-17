@@ -130,6 +130,7 @@ export function FeatureTreeMenu({
   return (
     <div
       ref={ref}
+      data-testid="feature-context-menu"
       className="fixed z-[100] min-w-[180px] rounded-md border border-[var(--cad-border)] bg-[var(--cad-bg-panel)] shadow-xl py-1"
       style={{ left: x, top: y }}
     >
