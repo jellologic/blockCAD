@@ -8,4 +8,4 @@ pub use stl::StlOptions;
 pub use obj::ObjOptions;
 pub use threemf::ThreeMfOptions;
 pub use gltf::GlbOptions;
-pub use step::{StepExportOptions, StepSchema};
+pub use step::StepOptions;

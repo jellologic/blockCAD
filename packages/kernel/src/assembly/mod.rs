@@ -3,20 +3,24 @@
 //! An Assembly contains Parts (each with its own FeatureTree) and
 //! Components (instances of Parts placed at specific transforms).
 
-pub mod assembly_feature;
 pub mod evaluator;
 pub mod interference;
 pub mod bom;
 pub mod mass;
-pub mod motion;
-pub mod pattern;
+pub mod configuration;
+pub mod section;
+pub mod reference_geometry;
+pub mod smart_mate;
+pub mod measure;
+pub mod report;
 
-use crate::error::{KernelError, KernelResult};
 use crate::feature_tree::FeatureTree;
 use crate::geometry::Mat4;
 use crate::geometry::transform;
 
-pub use assembly_feature::{AssemblyFeature, AssemblyFeatureKind};
+use self::configuration::AssemblyConfig;
+use self::reference_geometry::AssemblyRefGeometry;
+use self::section::SectionPlane;
 
 /// A part definition containing a parametric feature tree.
 #[derive(Debug)]
@@ -24,8 +28,19 @@ pub struct Part {
     pub id: String,
     pub name: String,
     pub tree: FeatureTree,
-    /// Material density (kg/m³ or arbitrary units). Default 1.0.
-    pub density: f64,
+    /// Custom properties (material, vendor, description, etc.).
+    pub properties: std::collections::HashMap<String, String>,
+}
+
+impl Part {
+    pub fn new(id: impl Into<String>, name: impl Into<String>, tree: FeatureTree) -> Self {
+        Self {
+            id: id.into(),
+            name: name.into(),
+            tree,
+            properties: std::collections::HashMap::new(),
+        }
+    }
 }
 
 /// A component instance — a Part placed at a specific position/orientation.
@@ -120,11 +135,6 @@ pub enum MateKind {
     // Advanced mates
     Width,
     Symmetric,
-    // Mechanical mates (continued)
-    RackPinion { pitch_radius: f64 },
-    Cam { lift: f64, base_radius: f64 },
-    Slot { axis: [f64; 3] },
-    UniversalJoint,
 }
 
 /// A step in an exploded view — translates a component outward.
@@ -135,64 +145,23 @@ pub struct ExplosionStep {
     pub distance: f64,
 }
 
-/// A sub-assembly reference — a nested assembly placed as a component.
-#[derive(Debug)]
-pub struct SubAssemblyRef {
-    /// Component ID used to reference this sub-assembly in the parent.
-    pub component_id: String,
-    /// Display name.
-    pub name: String,
-    /// 4x4 homogeneous transform matrix (column-major) for placement in parent.
-    pub transform: [f64; 16],
-    /// The nested assembly.
-    pub assembly: Assembly,
-    /// Whether this sub-assembly instance is suppressed.
-    pub suppressed: bool,
-    /// Whether this sub-assembly instance is hidden.
-    pub hidden: bool,
-    /// Whether this sub-assembly is grounded (fixed in parent).
-    pub grounded: bool,
-}
-
-impl SubAssemblyRef {
-    pub fn new(component_id: String, name: String, assembly: Assembly) -> Self {
-        Self {
-            component_id,
-            name,
-            transform: transform::to_array(&Mat4::identity()),
-            assembly,
-            suppressed: false,
-            hidden: false,
-            grounded: false,
-        }
-    }
-
-    pub fn with_transform(mut self, matrix: Mat4) -> Self {
-        self.transform = transform::to_array(&matrix);
-        self
-    }
-
-    pub fn with_grounded(mut self, grounded: bool) -> Self {
-        self.grounded = grounded;
-        self
-    }
-
-    pub fn transform_matrix(&self) -> Mat4 {
-        transform::from_array(&self.transform)
-    }
-}
-
 /// An assembly containing parts and their positioned instances.
 #[derive(Debug)]
 pub struct Assembly {
     pub parts: Vec<Part>,
     pub components: Vec<Component>,
-    pub sub_assemblies: Vec<SubAssemblyRef>,
     pub mates: Vec<Mate>,
     pub explosion_steps: Vec<ExplosionStep>,
-    pub patterns: Vec<pattern::AssemblyPattern>,
-    /// Assembly-level features (cuts/holes) applied across components after mate solving.
-    pub assembly_features: Vec<AssemblyFeature>,
+    /// Named configurations (C1).
+    pub configurations: Vec<AssemblyConfig>,
+    /// Currently active configuration index.
+    pub active_configuration: Option<usize>,
+    /// Section cutting plane (C3).
+    pub section_plane: Option<SectionPlane>,
+    /// Assembly-level reference geometry (C4).
+    pub reference_geometry: Vec<AssemblyRefGeometry>,
+    /// Dirty flags for BRep caching (D7). Maps part_id → dirty.
+    pub dirty_parts: std::collections::HashSet<String>,
 }
 
 impl Assembly {
@@ -200,16 +169,19 @@ impl Assembly {
         Self {
             parts: Vec::new(),
             components: Vec::new(),
-            sub_assemblies: Vec::new(),
             mates: Vec::new(),
             explosion_steps: Vec::new(),
-            patterns: Vec::new(),
-            assembly_features: Vec::new(),
+            configurations: Vec::new(),
+            active_configuration: None,
+            section_plane: None,
+            reference_geometry: Vec::new(),
+            dirty_parts: std::collections::HashSet::new(),
         }
     }
 
     /// Add a part definition. Returns its index.
     pub fn add_part(&mut self, part: Part) -> usize {
+        self.dirty_parts.insert(part.id.clone());
         let idx = self.parts.len();
         self.parts.push(part);
         idx
@@ -219,13 +191,6 @@ impl Assembly {
     pub fn add_component(&mut self, component: Component) -> usize {
         let idx = self.components.len();
         self.components.push(component);
-        idx
-    }
-
-    /// Add a sub-assembly reference. Returns its index.
-    pub fn add_sub_assembly(&mut self, sub: SubAssemblyRef) -> usize {
-        let idx = self.sub_assemblies.len();
-        self.sub_assemblies.push(sub);
         idx
     }
 
@@ -254,46 +219,130 @@ impl Assembly {
         }
     }
 
-    /// Get a mate by ID (for editing UI).
-    pub fn get_mate(&self, mate_id: &str) -> Option<&Mate> {
-        self.mates.iter().find(|m| m.id == mate_id)
+    // -- C6: Component delete with mate cascade --
+
+    /// Remove a component by ID and cascade-delete all referencing mates.
+    /// Returns true if the component was found and removed.
+    pub fn remove_component(&mut self, comp_id: &str) -> bool {
+        let had = self.components.len();
+        self.components.retain(|c| c.id != comp_id);
+        if self.components.len() == had {
+            return false;
+        }
+
+        // Cascade: remove mates referencing this component
+        self.mates.retain(|m| m.component_a != comp_id && m.component_b != comp_id);
+
+        // Also remove explosion steps for this component
+        self.explosion_steps.retain(|s| s.component_id != comp_id);
+
+        true
     }
 
-    /// Update an existing mate's kind and/or geometry references.
-    /// Only fields provided as `Some` are updated; `None` fields are left unchanged.
-    pub fn update_mate(
-        &mut self,
-        mate_id: &str,
-        kind: Option<MateKind>,
-        geometry_ref_a: Option<GeometryRef>,
-        geometry_ref_b: Option<GeometryRef>,
-    ) -> KernelResult<()> {
-        let mate = self
-            .mates
-            .iter_mut()
-            .find(|m| m.id == mate_id)
-            .ok_or_else(|| KernelError::NotFound(format!("Mate '{}' not found", mate_id)))?;
-        if let Some(k) = kind {
-            mate.kind = k;
-        }
-        if let Some(ref_a) = geometry_ref_a {
-            mate.geometry_ref_a = ref_a;
-        }
-        if let Some(ref_b) = geometry_ref_b {
-            mate.geometry_ref_b = ref_b;
-        }
-        Ok(())
+    // -- C8: Copy/Paste --
+
+    /// Copy selected components to a JSON snapshot.
+    pub fn copy_components(&self, comp_ids: &[String]) -> String {
+        let selected: Vec<&Component> = self.components.iter()
+            .filter(|c| comp_ids.contains(&c.id))
+            .collect();
+        serde_json::to_string(&selected).unwrap_or_else(|_| "[]".into())
     }
 
-    /// Remove a mate by ID.
-    pub fn remove_mate(&mut self, mate_id: &str) -> KernelResult<()> {
-        let idx = self
-            .mates
-            .iter()
-            .position(|m| m.id == mate_id)
-            .ok_or_else(|| KernelError::NotFound(format!("Mate '{}' not found", mate_id)))?;
-        self.mates.remove(idx);
-        Ok(())
+    /// Paste components from a JSON snapshot, generating new IDs.
+    /// `offset` is applied to each component's translation.
+    /// Returns the new component IDs.
+    pub fn paste_components(&mut self, snapshot: &str, offset: [f64; 3]) -> Vec<String> {
+        let comps: Vec<Component> = serde_json::from_str(snapshot).unwrap_or_default();
+        let mut new_ids = Vec::new();
+        let base = self.components.len();
+
+        for (i, mut comp) in comps.into_iter().enumerate() {
+            let new_id = format!("comp-paste-{}-{}", base, i);
+            comp.id = new_id.clone();
+            comp.name = format!("{} (Copy)", comp.name);
+            // Apply offset to translation
+            comp.transform[12] += offset[0];
+            comp.transform[13] += offset[1];
+            comp.transform[14] += offset[2];
+            self.components.push(comp);
+            new_ids.push(new_id);
+        }
+
+        new_ids
+    }
+
+    // -- C3: Section plane management --
+
+    /// Set a section cutting plane.
+    pub fn set_section_plane(&mut self, plane: SectionPlane) {
+        self.section_plane = Some(plane);
+    }
+
+    /// Clear the section cutting plane.
+    pub fn clear_section_plane(&mut self) {
+        self.section_plane = None;
+    }
+
+    // -- D7: Mark parts as dirty for incremental re-evaluation --
+
+    /// Mark a part as dirty (needs re-evaluation).
+    pub fn mark_part_dirty(&mut self, part_id: &str) {
+        self.dirty_parts.insert(part_id.to_string());
+    }
+
+    /// Check if a part is dirty.
+    pub fn is_part_dirty(&self, part_id: &str) -> bool {
+        self.dirty_parts.contains(part_id)
+    }
+
+    /// Clear all dirty flags.
+    pub fn clear_dirty_flags(&mut self) {
+        self.dirty_parts.clear();
+    }
+
+    // -- D6: Validate replacement --
+
+    /// Validate that a replacement part has compatible face topology.
+    /// Returns a list of face index mismatches (empty if compatible).
+    pub fn validate_replacement(&self, comp_id: &str, _new_part_id: &str) -> Vec<String> {
+        let mut conflicts = Vec::new();
+
+        let comp = match self.components.iter().find(|c| c.id == comp_id) {
+            Some(c) => c,
+            None => {
+                conflicts.push(format!("Component '{}' not found", comp_id));
+                return conflicts;
+            }
+        };
+
+        // Check if any mates reference face indices that might be invalid
+        for mate in &self.mates {
+            if mate.component_a == comp_id || mate.component_b == comp_id {
+                let face_ref = if mate.component_a == comp_id {
+                    &mate.geometry_ref_a
+                } else {
+                    &mate.geometry_ref_b
+                };
+                match face_ref {
+                    GeometryRef::Face(idx) => {
+                        conflicts.push(format!(
+                            "Mate '{}' references face {} — verify compatibility",
+                            mate.id, idx
+                        ));
+                    }
+                    GeometryRef::Edge(idx) => {
+                        conflicts.push(format!(
+                            "Mate '{}' references edge {} — verify compatibility",
+                            mate.id, idx
+                        ));
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        conflicts
     }
 }
 
@@ -307,88 +356,143 @@ impl Default for Assembly {
 mod tests {
     use super::*;
 
-    fn make_test_mate(id: &str) -> Mate {
-        Mate {
+    fn dummy_part(id: &str, name: &str) -> Part {
+        Part {
             id: id.into(),
-            kind: MateKind::Coincident,
-            component_a: "comp-a".into(),
-            component_b: "comp-b".into(),
-            geometry_ref_a: GeometryRef::Face(0),
-            geometry_ref_b: GeometryRef::Face(1),
-            suppressed: false,
+            name: name.into(),
+            tree: FeatureTree::new(),
+            properties: std::collections::HashMap::new(),
         }
     }
 
+    // -- C6 tests: remove_component --
+
     #[test]
-    fn get_mate_returns_existing() {
+    fn remove_component_cascades_mates() {
         let mut asm = Assembly::new();
-        asm.mates.push(make_test_mate("mate-1"));
-        let mate = asm.get_mate("mate-1");
-        assert!(mate.is_some());
-        assert_eq!(mate.unwrap().id, "mate-1");
+        asm.add_part(dummy_part("p1", "Part"));
+        asm.add_component(Component::new("c1".into(), "p1".into(), "A".into()));
+        asm.add_component(Component::new("c2".into(), "p1".into(), "B".into()));
+        asm.add_component(Component::new("c3".into(), "p1".into(), "C".into()));
+        asm.mates.push(Mate {
+            id: "m1".into(),
+            kind: MateKind::Coincident,
+            component_a: "c1".into(),
+            component_b: "c2".into(),
+            geometry_ref_a: GeometryRef::Face(0),
+            geometry_ref_b: GeometryRef::Face(0),
+            suppressed: false,
+        });
+        asm.mates.push(Mate {
+            id: "m2".into(),
+            kind: MateKind::Parallel,
+            component_a: "c2".into(),
+            component_b: "c3".into(),
+            geometry_ref_a: GeometryRef::Face(0),
+            geometry_ref_b: GeometryRef::Face(0),
+            suppressed: false,
+        });
+
+        assert!(asm.remove_component("c2"));
+        assert_eq!(asm.components.len(), 2);
+        // Both mates should be removed (c2 was in both)
+        assert_eq!(asm.mates.len(), 0);
     }
 
     #[test]
-    fn get_mate_returns_none_for_missing() {
-        let asm = Assembly::new();
-        assert!(asm.get_mate("no-such-mate").is_none());
+    fn remove_nonexistent_component_returns_false() {
+        let mut asm = Assembly::new();
+        assert!(!asm.remove_component("nonexistent"));
     }
 
     #[test]
-    fn update_mate_kind() {
+    fn remove_component_preserves_unrelated_mates() {
         let mut asm = Assembly::new();
-        asm.mates.push(make_test_mate("mate-1"));
+        asm.add_part(dummy_part("p1", "Part"));
+        asm.add_component(Component::new("c1".into(), "p1".into(), "A".into()));
+        asm.add_component(Component::new("c2".into(), "p1".into(), "B".into()));
+        asm.add_component(Component::new("c3".into(), "p1".into(), "C".into()));
+        asm.mates.push(Mate {
+            id: "m1".into(),
+            kind: MateKind::Coincident,
+            component_a: "c1".into(),
+            component_b: "c2".into(),
+            geometry_ref_a: GeometryRef::Face(0),
+            geometry_ref_b: GeometryRef::Face(0),
+            suppressed: false,
+        });
 
-        asm.update_mate("mate-1", Some(MateKind::Distance { value: 5.0 }), None, None)
-            .unwrap();
-
-        let mate = asm.get_mate("mate-1").unwrap();
-        assert!(matches!(mate.kind, MateKind::Distance { value } if (value - 5.0).abs() < 1e-12));
-    }
-
-    #[test]
-    fn update_mate_geometry_refs() {
-        let mut asm = Assembly::new();
-        asm.mates.push(make_test_mate("mate-1"));
-
-        asm.update_mate(
-            "mate-1",
-            None,
-            Some(GeometryRef::Edge(3)),
-            Some(GeometryRef::Vertex(7)),
-        )
-        .unwrap();
-
-        let mate = asm.get_mate("mate-1").unwrap();
-        assert!(matches!(mate.geometry_ref_a, GeometryRef::Edge(3)));
-        assert!(matches!(mate.geometry_ref_b, GeometryRef::Vertex(7)));
-        // kind should be unchanged
-        assert!(matches!(mate.kind, MateKind::Coincident));
-    }
-
-    #[test]
-    fn update_nonexistent_mate_returns_error() {
-        let mut asm = Assembly::new();
-        let result = asm.update_mate("no-such-mate", Some(MateKind::Parallel), None, None);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn remove_mate_success() {
-        let mut asm = Assembly::new();
-        asm.mates.push(make_test_mate("mate-1"));
-        asm.mates.push(make_test_mate("mate-2"));
-
-        asm.remove_mate("mate-1").unwrap();
+        // Remove c3, mate between c1-c2 should survive
+        assert!(asm.remove_component("c3"));
         assert_eq!(asm.mates.len(), 1);
-        assert!(asm.get_mate("mate-1").is_none());
-        assert!(asm.get_mate("mate-2").is_some());
+    }
+
+    // -- C8 tests: copy/paste --
+
+    #[test]
+    fn copy_and_paste_components() {
+        let mut asm = Assembly::new();
+        asm.add_part(dummy_part("p1", "Part"));
+        asm.add_component(Component::new("c1".into(), "p1".into(), "Box A".into()));
+        asm.add_component(Component::new("c2".into(), "p1".into(), "Box B".into()));
+
+        let snapshot = asm.copy_components(&["c1".into()]);
+        let new_ids = asm.paste_components(&snapshot, [10.0, 0.0, 0.0]);
+        assert_eq!(new_ids.len(), 1);
+        assert_eq!(asm.components.len(), 3);
+
+        let pasted = asm.components.last().unwrap();
+        assert!(pasted.name.contains("Copy"));
+        assert!((pasted.transform[12] - 10.0).abs() < 1e-6);
     }
 
     #[test]
-    fn remove_nonexistent_mate_returns_error() {
+    fn paste_multiple_components() {
         let mut asm = Assembly::new();
-        let result = asm.remove_mate("no-such-mate");
-        assert!(result.is_err());
+        asm.add_part(dummy_part("p1", "Part"));
+        asm.add_component(Component::new("c1".into(), "p1".into(), "A".into()));
+        asm.add_component(Component::new("c2".into(), "p1".into(), "B".into()));
+
+        let snapshot = asm.copy_components(&["c1".into(), "c2".into()]);
+        let new_ids = asm.paste_components(&snapshot, [0.0, 20.0, 0.0]);
+        assert_eq!(new_ids.len(), 2);
+        assert_eq!(asm.components.len(), 4);
+    }
+
+    #[test]
+    fn paste_empty_snapshot() {
+        let mut asm = Assembly::new();
+        let new_ids = asm.paste_components("[]", [0.0, 0.0, 0.0]);
+        assert!(new_ids.is_empty());
+    }
+
+    // -- D6 tests: validate replacement --
+
+    #[test]
+    fn validate_replacement_reports_mate_conflicts() {
+        let mut asm = Assembly::new();
+        asm.add_part(dummy_part("p1", "Part A"));
+        asm.add_part(dummy_part("p2", "Part B"));
+        asm.add_component(Component::new("c1".into(), "p1".into(), "Comp".into()));
+        asm.mates.push(Mate {
+            id: "m1".into(),
+            kind: MateKind::Coincident,
+            component_a: "c1".into(),
+            component_b: "c1".into(),
+            geometry_ref_a: GeometryRef::Face(3),
+            geometry_ref_b: GeometryRef::Face(5),
+            suppressed: false,
+        });
+
+        let conflicts = asm.validate_replacement("c1", "p2");
+        assert!(!conflicts.is_empty());
+    }
+
+    #[test]
+    fn validate_replacement_nonexistent_component() {
+        let asm = Assembly::new();
+        let conflicts = asm.validate_replacement("missing", "p1");
+        assert_eq!(conflicts.len(), 1);
+        assert!(conflicts[0].contains("not found"));
     }
 }

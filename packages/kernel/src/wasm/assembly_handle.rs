@@ -1,6 +1,6 @@
 use wasm_bindgen::prelude::*;
 
-use crate::assembly::{Assembly, Component, Part, SubAssemblyRef};
+use crate::assembly::{Assembly, Component, Part};
 use crate::feature_tree::{Feature, FeatureKind, FeatureParams, FeatureTree};
 use crate::serialization::assembly_io;
 use crate::tessellation::{tessellate_brep, TessellationParams};
@@ -27,12 +27,7 @@ impl AssemblyHandle {
     /// Add a new part to the assembly. Returns the part ID.
     pub fn add_part(&mut self, name: &str) -> String {
         let id = format!("part-{}", self.assembly.parts.len());
-        self.assembly.add_part(Part {
-            id: id.clone(),
-            name: name.into(),
-            tree: FeatureTree::new(),
-            density: 1.0,
-        });
+        self.assembly.add_part(Part::new(id.clone(), name, FeatureTree::new()));
         id
     }
 
@@ -78,7 +73,6 @@ impl AssemblyHandle {
         name: &str,
         transform_json: &str,
     ) -> Result<String, JsValue> {
-        // Verify part exists
         if self.assembly.find_part(part_id).is_none() {
             return Err(JsValue::from_str(&format!("Part '{}' not found", part_id)));
         }
@@ -86,7 +80,6 @@ impl AssemblyHandle {
         let id = format!("comp-{}", self.assembly.components.len());
         let mut component = Component::new(id.clone(), part_id.into(), name.into());
 
-        // Parse transform if provided
         if !transform_json.is_empty() && transform_json != "{}" {
             let arr: [f64; 16] = serde_json::from_str(transform_json)
                 .map_err(|e| JsValue::from_str(&format!("Invalid transform: {}", e)))?;
@@ -242,6 +235,18 @@ impl AssemblyHandle {
         serde_json::to_string(&bom).unwrap_or_else(|_| "[]".into())
     }
 
+    /// Get advanced BOM with properties as JSON.
+    pub fn get_advanced_bom_json(&self) -> String {
+        let bom = crate::assembly::bom::generate_advanced_bom(&self.assembly);
+        serde_json::to_string(&bom).unwrap_or_else(|_| "[]".into())
+    }
+
+    /// Get advanced BOM as CSV string.
+    pub fn get_bom_csv(&self) -> String {
+        let bom = crate::assembly::bom::generate_advanced_bom(&self.assembly);
+        crate::assembly::bom::bom_to_csv(&bom)
+    }
+
     /// Set explosion steps from JSON array.
     pub fn set_explosion_steps(&mut self, json: &str) -> Result<(), JsValue> {
         let steps: Vec<crate::assembly::ExplosionStep> = serde_json::from_str(json)
@@ -308,211 +313,210 @@ impl AssemblyHandle {
             .map_err(|e| -> JsValue { e.into() })
     }
 
-    /// Update an existing mate.
-    pub fn update_mate(&mut self, mate_id: &str, mate_json: &str) -> Result<(), JsValue> {
-        #[derive(serde::Deserialize)]
-        struct MateUpdate {
-            kind: Option<crate::assembly::MateKind>,
-            geometry_ref_a: Option<crate::assembly::GeometryRef>,
-            geometry_ref_b: Option<crate::assembly::GeometryRef>,
-        }
-        let update: MateUpdate = serde_json::from_str(mate_json)
-            .map_err(|e| JsValue::from_str(&format!("Invalid mate update JSON: {}", e)))?;
-        self.assembly
-            .update_mate(mate_id, update.kind, update.geometry_ref_a, update.geometry_ref_b)
-            .map_err(|e| -> JsValue { e.into() })
-    }
+    // -- C1: Configurations --
 
-    /// Remove a mate by ID.
-    pub fn remove_mate(&mut self, mate_id: &str) -> Result<(), JsValue> {
-        self.assembly
-            .remove_mate(mate_id)
-            .map_err(|e| -> JsValue { e.into() })
-    }
-
-    /// Get a mate by ID as JSON. Returns null if not found.
-    pub fn get_mate(&self, mate_id: &str) -> Result<JsValue, JsValue> {
-        match self.assembly.get_mate(mate_id) {
-            Some(mate) => {
-                let json = serde_json::to_string(mate)
-                    .map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))?;
-                Ok(JsValue::from_str(&json))
-            }
-            None => Ok(JsValue::NULL),
-        }
-    }
-
-    /// Add an assembly pattern (linear or circular component array).
-    pub fn add_assembly_pattern(&mut self, pattern_json: &str) -> Result<JsValue, JsValue> {
-        let pattern: crate::assembly::pattern::AssemblyPattern =
-            serde_json::from_str(pattern_json)
-                .map_err(|e| JsValue::from_str(&format!("Invalid pattern JSON: {}", e)))?;
-        let new_ids = crate::assembly::pattern::apply_assembly_pattern(
-            &mut self.assembly,
-            &pattern,
+    /// Add a configuration. Returns its index.
+    pub fn add_configuration(&mut self, name: &str) -> usize {
+        self.assembly.add_configuration(
+            crate::assembly::configuration::AssemblyConfig::new(name)
         )
-        .map_err(|e| -> JsValue { e.into() })?;
-        let json = serde_json::to_string(&new_ids)
-            .map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))?;
-        Ok(JsValue::from_str(&json))
     }
 
-    /// Remove an assembly pattern and all its generated components/mates.
-    pub fn remove_assembly_pattern(&mut self, pattern_id: &str) -> Result<(), JsValue> {
-        crate::assembly::pattern::remove_assembly_pattern(&mut self.assembly, pattern_id)
-            .map_err(|e| -> JsValue { e.into() })
+    /// Activate a configuration by index.
+    pub fn activate_configuration(&mut self, index: usize) -> bool {
+        self.assembly.activate_configuration(index)
     }
 
-    // --- Sub-assembly methods (from agent-a4f5854e) ---
-
-    /// Add a sub-assembly to this assembly. Returns the sub-assembly index.
-    pub fn add_sub_assembly(&mut self, name: &str) -> usize {
-        let sub = SubAssemblyRef::new(
-            format!("sub-{}", self.assembly.sub_assemblies.len()),
-            name.into(),
-            Assembly::new(),
-        );
-        self.assembly.add_sub_assembly(sub)
+    /// List configurations as JSON array of names.
+    pub fn list_configurations_json(&self) -> String {
+        let names = self.assembly.list_configurations();
+        serde_json::to_string(&names).unwrap_or_else(|_| "[]".into())
     }
 
-    /// Get the number of sub-assemblies.
-    pub fn sub_assembly_count(&self) -> usize {
-        self.assembly.sub_assemblies.len()
-    }
+    // -- C3: Section views --
 
-    // --- Face selection methods (from agent-a8ad0135) ---
-
-    /// Tessellate each component separately, returning per-component mesh data with face IDs.
-    pub fn tessellate_per_component(
-        &mut self,
-        chord_tolerance: f64,
-        angle_tolerance: f64,
-    ) -> Result<JsValue, JsValue> {
-        let result = crate::assembly::evaluator::evaluate_assembly(&mut self.assembly)
-            .map_err(|e| -> JsValue { e.into() })?;
-
-        let params = TessellationParams {
-            chord_tolerance,
-            angle_tolerance,
-            ..TessellationParams::default()
-        };
-
-        let mut components_json: Vec<serde_json::Value> = Vec::new();
-
-        for (comp_idx, (comp_id, brep)) in result.components.iter().enumerate() {
-            let mesh = tessellate_brep(brep, &params)
-                .map_err(|e| -> JsValue { e.into() })?;
-
-            let positions: Vec<f64> = mesh.positions.iter().map(|&v| v as f64).collect();
-            let normals: Vec<f64> = mesh.normals.iter().map(|&v| v as f64).collect();
-            let indices: Vec<u32> = mesh.indices.clone();
-            let face_ids: Vec<u32> = mesh.face_ids.clone();
-
-            components_json.push(serde_json::json!({
-                "component_id": comp_id,
-                "component_index": comp_idx,
-                "positions": positions,
-                "normals": normals,
-                "indices": indices,
-                "face_ids": face_ids,
-            }));
-        }
-
-        let json_str = serde_json::to_string(&components_json)
-            .map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))?;
-        Ok(JsValue::from_str(&json_str))
-    }
-
-    // --- Transform gizmo methods (from agent-a8393ac5) ---
-
-    /// Set the transform of a component by index.
-    pub fn set_component_transform(&mut self, index: usize, transform_json: &str) -> Result<(), JsValue> {
-        let comp = self.assembly.components.get_mut(index)
-            .ok_or_else(|| JsValue::from_str("Component index out of bounds"))?;
-        let arr: [f64; 16] = serde_json::from_str(transform_json)
-            .map_err(|e| JsValue::from_str(&format!("Invalid transform: {}", e)))?;
-        comp.transform = arr;
+    /// Set a section cutting plane. JSON: { normal: [x,y,z], offset: f64 }
+    pub fn set_section_plane(&mut self, json: &str) -> Result<(), JsValue> {
+        let plane: crate::assembly::section::SectionPlane = serde_json::from_str(json)
+            .map_err(|e| JsValue::from_str(&format!("Invalid section plane: {}", e)))?;
+        self.assembly.set_section_plane(plane);
         Ok(())
     }
 
-    /// Get the transform of a component by index as a JSON array of 16 f64 values.
-    pub fn get_component_transform(&self, index: usize) -> Result<String, JsValue> {
-        let comp = self.assembly.components.get(index)
-            .ok_or_else(|| JsValue::from_str("Component index out of bounds"))?;
-        serde_json::to_string(&comp.transform)
-            .map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
+    /// Clear the section cutting plane.
+    pub fn clear_section_plane(&mut self) {
+        self.assembly.clear_section_plane();
     }
 
-    // --- Motion study methods (from agent-a1a483f6) ---
+    // -- C4: Reference geometry --
 
-    /// Run a motion study on the assembly.
-    pub fn run_motion_study(&mut self, params_json: &str) -> Result<JsValue, JsValue> {
-        let params: crate::assembly::motion::MotionStudyParams =
-            serde_json::from_str(params_json)
-                .map_err(|e| JsValue::from_str(&format!("Invalid motion study params: {}", e)))?;
-
-        let frames =
-            crate::assembly::motion::run_motion_study(&mut self.assembly, &params)
-                .map_err(|e| -> JsValue { e.into() })?;
-
-        let json = serde_json::to_string(&frames)
-            .map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))?;
-
-        Ok(JsValue::from_str(&json))
+    /// Add reference geometry from JSON. Returns the ID.
+    pub fn add_reference_geometry(&mut self, json: &str) -> Result<String, JsValue> {
+        let geom: crate::assembly::reference_geometry::AssemblyRefGeometry = serde_json::from_str(json)
+            .map_err(|e| JsValue::from_str(&format!("Invalid ref geometry: {}", e)))?;
+        Ok(self.assembly.add_reference_geometry(geom))
     }
 
-    // --- Interference detection methods (from agent-ab4b1b58) ---
+    /// List reference geometry as JSON array.
+    pub fn list_reference_geometry_json(&self) -> String {
+        serde_json::to_string(self.assembly.list_reference_geometry())
+            .unwrap_or_else(|_| "[]".into())
+    }
 
-    /// Run detailed interference detection (triangle-level narrow-phase).
-    pub fn check_interference_json(&mut self) -> Result<JsValue, JsValue> {
+    // -- C5: Smart mates --
+
+    /// Suggest a mate type based on face geometry. Returns JSON MateKind.
+    pub fn suggest_mate(&mut self, face_a: usize, face_b: usize) -> Result<String, JsValue> {
         let result = crate::assembly::evaluator::evaluate_assembly(&mut self.assembly)
             .map_err(|e| -> JsValue { e.into() })?;
 
-        let params = TessellationParams {
-            chord_tolerance: 0.1,
-            angle_tolerance: 15.0_f64.to_radians(),
-            ..TessellationParams::default()
-        };
-
-        let mut mesh_data: Vec<(String, crate::tessellation::mesh::TriMesh, [f64; 16])> = Vec::new();
-        for (comp_id, brep) in &result.components {
-            let mesh = tessellate_brep(brep, &params)
-                .map_err(|e| -> JsValue { e.into() })?;
-            let transform = self.assembly.components.iter()
-                .find(|c| c.id == *comp_id)
-                .map(|c| c.transform)
-                .unwrap_or_else(|| crate::geometry::transform::to_array(&crate::geometry::Mat4::identity()));
-            mesh_data.push((comp_id.clone(), mesh, transform));
+        if result.components.len() < 2 {
+            return Ok("\"coincident\"".into());
         }
 
-        let components: Vec<(String, &crate::tessellation::mesh::TriMesh, [f64; 16])> = mesh_data
+        let brep_a = &result.components[0].1;
+        let brep_b = &result.components[1].1;
+        let suggestion = crate::assembly::smart_mate::suggest_mate(brep_a, face_a, brep_b, face_b);
+        serde_json::to_string(&suggestion)
+            .map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
+    }
+
+    // -- C6: Remove component --
+
+    /// Remove a component by ID. Cascade-deletes referencing mates.
+    pub fn remove_component(&mut self, comp_id: &str) -> bool {
+        self.assembly.remove_component(comp_id)
+    }
+
+    // -- C7: DOF analysis --
+
+    /// Get per-component DOF analysis as JSON.
+    pub fn get_dof_analysis_json(&self) -> String {
+        let analysis = crate::solver::dof::analyze_assembly_dof(&self.assembly);
+        serde_json::to_string(&analysis).unwrap_or_else(|_| "[]".into())
+    }
+
+    // -- C8: Copy/Paste --
+
+    /// Copy selected components to a JSON snapshot.
+    pub fn copy_components(&self, ids_json: &str) -> Result<String, JsValue> {
+        let ids: Vec<String> = serde_json::from_str(ids_json)
+            .map_err(|e| JsValue::from_str(&format!("Invalid IDs: {}", e)))?;
+        Ok(self.assembly.copy_components(&ids))
+    }
+
+    /// Paste components from snapshot with offset. Returns JSON array of new IDs.
+    pub fn paste_components(&mut self, snapshot: &str, offset_json: &str) -> Result<String, JsValue> {
+        let offset: [f64; 3] = serde_json::from_str(offset_json)
+            .map_err(|e| JsValue::from_str(&format!("Invalid offset: {}", e)))?;
+        let new_ids = self.assembly.paste_components(snapshot, offset);
+        serde_json::to_string(&new_ids)
+            .map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
+    }
+
+    // -- C10: Measure tool --
+
+    /// Measure distance between two geometry references.
+    /// JSON: { comp_a, geom_a: { face: N }, comp_b, geom_b: { face: N } }
+    pub fn measure_distance(&mut self, json: &str) -> Result<String, JsValue> {
+        #[derive(serde::Deserialize)]
+        struct MeasureInput {
+            comp_a: String,
+            geom_a: crate::assembly::GeometryRef,
+            comp_b: String,
+            geom_b: crate::assembly::GeometryRef,
+        }
+        let input: MeasureInput = serde_json::from_str(json)
+            .map_err(|e| JsValue::from_str(&format!("Invalid measure input: {}", e)))?;
+
+        let result = crate::assembly::evaluator::evaluate_assembly(&mut self.assembly)
+            .map_err(|e| -> JsValue { e.into() })?;
+
+        let brep_a = result.components.iter().find(|(id, _)| *id == input.comp_a)
+            .map(|(_, b)| b)
+            .ok_or_else(|| JsValue::from_str("Component A not found in results"))?;
+        let brep_b = result.components.iter().find(|(id, _)| *id == input.comp_b)
+            .map(|(_, b)| b)
+            .ok_or_else(|| JsValue::from_str("Component B not found in results"))?;
+
+        let measurement = crate::assembly::measure::measure_distance(
+            &self.assembly, &input.comp_a, &input.geom_a, brep_a,
+            &input.comp_b, &input.geom_b, brep_b,
+        ).ok_or_else(|| JsValue::from_str("Measurement failed"))?;
+
+        serde_json::to_string(&measurement)
+            .map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
+    }
+
+    // -- D1: STEP export --
+
+    /// Export assembly as STEP text.
+    pub fn export_step(&self) -> Result<String, JsValue> {
+        let components: Vec<crate::export::step::StepComponent> = self.assembly.components
             .iter()
-            .map(|(id, mesh, t)| (id.clone(), mesh, *t))
+            .filter(|c| !c.suppressed)
+            .map(|c| {
+                let part_name = self.assembly.find_part(&c.part_id)
+                    .map(|p| p.name.clone())
+                    .unwrap_or_else(|| c.part_id.clone());
+                crate::export::step::StepComponent {
+                    id: c.id.clone(),
+                    name: c.name.clone(),
+                    part_name,
+                    transform: c.transform,
+                }
+            })
             .collect();
 
-        let interference_result = crate::assembly::interference::check_interference_detailed(&components);
-
-        let json = serde_json::to_string(&interference_result)
-            .map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))?;
-        Ok(JsValue::from_str(&json))
+        crate::export::step::export_step_assembly(&self.name, &components, &Default::default())
+            .map_err(|e| -> JsValue { e.into() })
     }
 
-    // --- Assembly feature methods (from agent-a30b2054) ---
+    // -- D4: Assembly report --
 
-    /// Add an assembly-level feature (cut or hole across components).
-    pub fn add_assembly_feature(&mut self, feature_json: &str) -> Result<String, JsValue> {
-        let feature: crate::assembly::AssemblyFeature = serde_json::from_str(feature_json)
-            .map_err(|e| JsValue::from_str(&format!("Invalid assembly feature JSON: {}", e)))?;
-        let id = feature.id.clone();
-        self.assembly.assembly_features.push(feature);
-        Ok(id)
+    /// Generate a full assembly report as JSON.
+    pub fn generate_report_json(&mut self) -> Result<String, JsValue> {
+        let result = crate::assembly::evaluator::evaluate_assembly(&mut self.assembly)
+            .map_err(|e| -> JsValue { e.into() })?;
+        let report = crate::assembly::report::generate_report(
+            &self.assembly, &self.name, &result.components,
+        );
+        serde_json::to_string(&report)
+            .map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
     }
 
-    /// Remove an assembly-level feature by ID. Returns true if found and removed.
-    pub fn remove_assembly_feature(&mut self, feature_id: &str) -> bool {
-        let before = self.assembly.assembly_features.len();
-        self.assembly.assembly_features.retain(|f| f.id != feature_id);
-        self.assembly.assembly_features.len() < before
+    /// Generate a full assembly report as HTML.
+    pub fn generate_report_html(&mut self) -> Result<String, JsValue> {
+        let result = crate::assembly::evaluator::evaluate_assembly(&mut self.assembly)
+            .map_err(|e| -> JsValue { e.into() })?;
+        let report = crate::assembly::report::generate_report(
+            &self.assembly, &self.name, &result.components,
+        );
+        Ok(crate::assembly::report::report_to_html(&report))
+    }
+
+    // -- D6: Validate replacement --
+
+    /// Validate that a replacement part has compatible face topology.
+    pub fn validate_replacement(&self, comp_id: &str, new_part_id: &str) -> String {
+        let conflicts = self.assembly.validate_replacement(comp_id, new_part_id);
+        serde_json::to_string(&conflicts).unwrap_or_else(|_| "[]".into())
+    }
+
+    // -- D7: Performance (dirty flags) --
+
+    /// Mark a part as dirty (forces re-evaluation).
+    pub fn mark_part_dirty(&mut self, part_id: &str) {
+        self.assembly.mark_part_dirty(part_id);
+    }
+
+    /// Set a part property.
+    pub fn set_part_property(&mut self, part_id: &str, key: &str, value: &str) -> Result<(), JsValue> {
+        let part = self.assembly.find_part_mut(part_id).ok_or_else(|| {
+            JsValue::from_str(&format!("Part '{}' not found", part_id))
+        })?;
+        part.properties.insert(key.into(), value.into());
+        Ok(())
     }
 
     pub fn part_count(&self) -> usize {

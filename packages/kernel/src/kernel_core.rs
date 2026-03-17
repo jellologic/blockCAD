@@ -158,9 +158,16 @@ impl KernelCore {
         _angle_tolerance: f64,
         options_json: &str,
     ) -> KernelResult<String> {
-        let options: crate::export::StepExportOptions = serde_json::from_str(options_json).unwrap_or_default();
+        let options: crate::export::StepOptions = serde_json::from_str(options_json).unwrap_or_default();
+        // For single-part STEP export, create a single component
         let brep = evaluate(&mut self.tree)?;
-        crate::export::step::export_step(&brep, &options)
+        let comp = crate::export::step::StepComponent {
+            id: "part-1".into(),
+            name: self.name.clone(),
+            part_name: self.name.clone(),
+            transform: crate::geometry::transform::to_array(&crate::geometry::transform::translation(0.0, 0.0, 0.0)),
+        };
+        crate::export::step::export_step_assembly(&self.name, &[comp], &options)
     }
 
     /// Compute mass properties from the current model state.

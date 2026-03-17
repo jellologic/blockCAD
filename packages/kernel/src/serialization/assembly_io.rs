@@ -1,6 +1,6 @@
 //! Assembly document serialization — .blockcad-assembly JSON format.
 
-use crate::assembly::{Assembly, Component, Mate, Part, SubAssemblyRef};
+use crate::assembly::{Assembly, Component, Mate, Part};
 use crate::error::KernelResult;
 
 use super::feature_tree_io;
@@ -22,12 +22,6 @@ pub struct AssemblyDocument {
     /// Explosion steps for exploded views.
     #[serde(default)]
     pub explosion_steps: Vec<crate::assembly::ExplosionStep>,
-    /// Nested sub-assembly documents.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub sub_assemblies: Vec<AssemblyDocument>,
-    /// Assembly-level features (cuts/holes across components).
-    #[serde(default)]
-    pub assembly_features: Vec<crate::assembly::AssemblyFeature>,
 }
 
 impl AssemblyDocument {
@@ -48,12 +42,6 @@ pub fn serialize_assembly(assembly: &Assembly, name: &str) -> KernelResult<Assem
         parts.push(doc);
     }
 
-    let mut sub_docs = Vec::new();
-    for sub_ref in &assembly.sub_assemblies {
-        let sub_name = format!("{} / {}", name, sub_ref.name);
-        sub_docs.push(serialize_assembly(&sub_ref.assembly, &sub_name)?);
-    }
-
     Ok(AssemblyDocument {
         schema_url: Some("https://blockcad.dev/schema/assembly/v1.json".into()),
         version: SCHEMA_VERSION,
@@ -62,8 +50,6 @@ pub fn serialize_assembly(assembly: &Assembly, name: &str) -> KernelResult<Assem
         components: assembly.components.clone(),
         mates: assembly.mates.clone(),
         explosion_steps: assembly.explosion_steps.clone(),
-        sub_assemblies: sub_docs,
-        assembly_features: assembly.assembly_features.clone(),
     })
 }
 
@@ -72,33 +58,15 @@ pub fn deserialize_assembly(doc: &AssemblyDocument) -> KernelResult<Assembly> {
     let mut parts = Vec::new();
     for (i, part_doc) in doc.parts.iter().enumerate() {
         let tree = feature_tree_io::deserialize_tree(part_doc)?;
-        parts.push(Part {
-            id: format!("part-{}", i),
-            name: part_doc.metadata.name.clone(),
-            tree,
-            density: 1.0,
-        });
+        parts.push(Part::new(format!("part-{}", i), part_doc.metadata.name.clone(), tree));
     }
 
-    let mut sub_assemblies = Vec::new();
-    for (i, sub_doc) in doc.sub_assemblies.iter().enumerate() {
-        let sub_asm = deserialize_assembly(sub_doc)?;
-        sub_assemblies.push(SubAssemblyRef::new(
-            format!("sub-{}", i),
-            sub_doc.metadata.name.clone(),
-            sub_asm,
-        ));
-    }
-
-    Ok(Assembly {
-        parts,
-        components: doc.components.clone(),
-        sub_assemblies,
-        mates: doc.mates.clone(),
-        explosion_steps: doc.explosion_steps.clone(),
-        patterns: Vec::new(),
-        assembly_features: doc.assembly_features.clone(),
-    })
+    let mut assembly = Assembly::new();
+    assembly.parts = parts;
+    assembly.components = doc.components.clone();
+    assembly.mates = doc.mates.clone();
+    assembly.explosion_steps = doc.explosion_steps.clone();
+    Ok(assembly)
 }
 
 #[cfg(test)]
@@ -117,7 +85,7 @@ mod tests {
             FeatureKind::Extrude,
             FeatureParams::Extrude(ExtrudeParams::blind(Vec3::new(0.0, 0.0, 1.0), 10.0)),
         ));
-        Part { id: id.into(), name: name.into(), tree, density: 1.0 }
+        Part::new(id, name, tree)
     }
 
     #[test]

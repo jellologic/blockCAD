@@ -14,15 +14,6 @@ use super::newton_raphson::{solve, SolverConfig, SolverResult};
 use super::variable::Variable;
 use crate::geometry::transform;
 
-/// A driver override for motion studies: forces a component's rotation (rx) to a fixed value.
-#[derive(Debug, Clone)]
-pub struct DriverOverride {
-    /// Component whose rx should be driven.
-    pub component_id: String,
-    /// The rotation value (radians) to fix rx to.
-    pub rx_value: f64,
-}
-
 /// Solve assembly mates, updating component transforms.
 ///
 /// The first component is grounded (fixed). Remaining components are free (6 DOF each).
@@ -32,26 +23,6 @@ pub struct DriverOverride {
 pub fn solve_assembly_mates(
     assembly: &mut Assembly,
     part_breps: &HashMap<String, BRep>,
-) -> KernelResult<SolverResult> {
-    solve_assembly_mates_inner(assembly, part_breps, None)
-}
-
-/// Solve assembly mates with an optional driver override for motion studies.
-///
-/// When `driver` is provided, the specified component's rx variable is fixed to the
-/// given value instead of 0, allowing motion studies to drive rotation.
-pub fn solve_assembly_mates_driven(
-    assembly: &mut Assembly,
-    part_breps: &HashMap<String, BRep>,
-    driver: &DriverOverride,
-) -> KernelResult<SolverResult> {
-    solve_assembly_mates_inner(assembly, part_breps, Some(driver))
-}
-
-fn solve_assembly_mates_inner(
-    assembly: &mut Assembly,
-    part_breps: &HashMap<String, BRep>,
-    driver: Option<&DriverOverride>,
 ) -> KernelResult<SolverResult> {
     if assembly.components.is_empty() {
         return Ok(SolverResult { converged: true, iterations: 0, residual: 0.0 });
@@ -78,33 +49,22 @@ fn solve_assembly_mates_inner(
         let is_grounded = comp.grounded || (!has_explicit_ground && !first_active_seen);
         first_active_seen = true;
 
-        // Check if this component has a driver override for its rotation
-        let driven_rx = driver
-            .filter(|d| d.component_id == comp.id)
-            .map(|d| d.rx_value);
-
         if is_grounded {
-            let rx_val = driven_rx.unwrap_or(0.0);
             let vars = ComponentVars {
                 tx: graph.variables.add(Variable::fixed(t.x)),
                 ty: graph.variables.add(Variable::fixed(t.y)),
                 tz: graph.variables.add(Variable::fixed(t.z)),
-                rx: graph.variables.add(Variable::fixed(rx_val)),
+                rx: graph.variables.add(Variable::fixed(0.0)),
                 ry: graph.variables.add(Variable::fixed(0.0)),
                 rz: graph.variables.add(Variable::fixed(0.0)),
             };
             comp_vars.insert(comp.id.clone(), vars);
         } else {
-            let rx_var = if let Some(rx_val) = driven_rx {
-                Variable::fixed(rx_val)
-            } else {
-                Variable::new(0.0)
-            };
             let vars = ComponentVars {
                 tx: graph.variables.add(Variable::new(t.x)),
                 ty: graph.variables.add(Variable::new(t.y)),
                 tz: graph.variables.add(Variable::new(t.z)),
-                rx: graph.variables.add(rx_var),
+                rx: graph.variables.add(Variable::new(0.0)),
                 ry: graph.variables.add(Variable::new(0.0)),
                 rz: graph.variables.add(Variable::new(0.0)),
             };
@@ -237,43 +197,6 @@ fn solve_assembly_mates_inner(
                     *vars_a, *vars_b, face_a, face_b,
                 )));
             }
-            MateKind::RackPinion { pitch_radius } => {
-                // Rack (component_b) translates in X proportional to pinion (component_a) rotation
-                graph.add_equation(Box::new(RackPinionEquation::new(vars_b.tx, vars_a.rx, *pitch_radius)));
-            }
-            MateKind::Cam { lift, base_radius } => {
-                // Cam: follower tz (comp_b) = base_radius + lift * sin(rx of comp_a)
-                graph.add_equation(Box::new(CamEquation::new(
-                    vars_b.tz, vars_a.rx, *lift, *base_radius,
-                )));
-            }
-            MateKind::Slot { axis } => {
-                // Slot: constrain comp_b to slide along the given axis through comp_a
-                let slot_axis = Vec3::new(axis[0], axis[1], axis[2]);
-                let (eq_u, eq_v) = SlotEquation::pair(*vars_a, *vars_b, slot_axis);
-                graph.add_equation(Box::new(eq_u));
-                graph.add_equation(Box::new(eq_v));
-            }
-            MateKind::UniversalJoint => {
-                // Universal joint (Hooke's joint): axes intersect at a point,
-                // each component retains rotational freedom about its own axis.
-                let axis_a = extract_axis_geometry(brep_a, &mate.geometry_ref_a)?;
-                let axis_b = extract_axis_geometry(brep_b, &mate.geometry_ref_b)?;
-                // 3 equations for point coincidence (x, y, z)
-                graph.add_equation(Box::new(UniversalJointPointXEquation::new(
-                    *vars_a, *vars_b, axis_a.clone(), axis_b.clone(),
-                )));
-                graph.add_equation(Box::new(UniversalJointPointYEquation::new(
-                    *vars_a, *vars_b, axis_a.clone(), axis_b.clone(),
-                )));
-                graph.add_equation(Box::new(UniversalJointPointZEquation::new(
-                    *vars_a, *vars_b, axis_a.clone(), axis_b.clone(),
-                )));
-                // 1 equation for no-twist (perpendicular axes)
-                graph.add_equation(Box::new(UniversalJointNoTwistEquation::new(
-                    *vars_a, *vars_b, axis_a, axis_b,
-                )));
-            }
         }
     }
 
@@ -395,7 +318,7 @@ mod tests {
         tree.push(Feature::new("e1".into(), "Extrude".into(), FeatureKind::Extrude,
             FeatureParams::Extrude(ExtrudeParams::blind(Vec3::new(0.0, 0.0, 1.0), 7.0))));
 
-        Part { id: id.into(), name: format!("Box {}", id), tree, density: 1.0 }
+        Part::new(id, format!("Box {}", id), tree)
     }
 
     fn evaluate_parts(assembly: &mut Assembly) -> HashMap<String, BRep> {
@@ -476,76 +399,6 @@ mod tests {
     }
 
     #[test]
-    fn rack_pinion_solver_converges() {
-        use crate::solver::variable::Variable;
-        use crate::solver::equations_3d::RackPinionEquation;
-        use super::super::graph::ConstraintGraph;
-        use super::super::newton_raphson::{solve, SolverConfig};
-
-        let mut graph = ConstraintGraph::new();
-        let pitch_radius = 5.0;
-        let target_rotation = std::f64::consts::PI;
-
-        // Rack: free tx (starts at 0, solver must find correct value)
-        let rack_tx = graph.variables.add(Variable::new(0.0));
-
-        // Pinion: rx is fixed at PI
-        let pinion_rx = graph.variables.add(Variable::fixed(target_rotation));
-
-        // Rack-pinion coupling: tx_rack = rx_pinion * pitch_radius
-        graph.add_equation(Box::new(RackPinionEquation::new(rack_tx, pinion_rx, pitch_radius)));
-
-        let config = SolverConfig { max_iterations: 50, tolerance: 1e-10 };
-        let result = solve(&mut graph, &config).unwrap();
-        assert!(result.converged, "Rack-pinion solver should converge");
-
-        let solved_tx = graph.variables.value(rack_tx);
-        let expected = target_rotation * pitch_radius;
-        assert!((solved_tx - expected).abs() < 1e-6,
-            "Rack tx should be PI * 5.0 = {:.6}, got {:.6}", expected, solved_tx);
-    }
-
-    #[test]
-    fn solve_slot_mate_x_axis() {
-        // Slot mate along X axis: comp_b starts at (3, 5, 7).
-        // The solver should zero out Y and Z while X remains free.
-        let mut assembly = Assembly::new();
-        assembly.add_part(make_box_part("part1"));
-        assembly.add_part(make_box_part("part2"));
-
-        assembly.add_component(
-            Component::new("comp1".into(), "part1".into(), "Box A".into())
-                .with_grounded(true)
-        );
-        assembly.add_component(
-            Component::new("comp2".into(), "part2".into(), "Box B".into())
-                .with_transform(transform::translation(3.0, 5.0, 7.0))
-        );
-
-        assembly.mates.push(Mate {
-            id: "slot1".into(),
-            kind: MateKind::Slot { axis: [1.0, 0.0, 0.0] },
-            component_a: "comp1".into(),
-            component_b: "comp2".into(),
-            geometry_ref_a: GeometryRef::Face(0),
-            geometry_ref_b: GeometryRef::Face(0),
-            suppressed: false,
-        });
-
-        let part_breps = evaluate_parts(&mut assembly);
-        let result = solve_assembly_mates(&mut assembly, &part_breps).unwrap();
-        assert!(result.converged, "Slot mate solver should converge, residual={:.6}", result.residual);
-        assert!(result.residual < 0.01, "Slot mate residual should be near zero, got {:.6}", result.residual);
-
-        // After solving, comp_b's Y and Z should be ~0, X can be anything
-        let comp_b = assembly.components.iter().find(|c| c.id == "comp2").unwrap();
-        let t = comp_b.transform_matrix();
-        let pos = transform::get_translation(&t);
-        assert!(pos.y.abs() < 0.1, "Y should be ~0 after slot solve, got {:.4}", pos.y);
-        assert!(pos.z.abs() < 0.1, "Z should be ~0 after slot solve, got {:.4}", pos.z);
-    }
-
-    #[test]
     fn no_mates_is_noop() {
         let mut assembly = Assembly::new();
         assembly.add_part(make_box_part("part1"));
@@ -555,126 +408,5 @@ mod tests {
         let result = solve_assembly_mates(&mut assembly, &part_breps).unwrap();
         assert!(result.converged);
         assert_eq!(result.iterations, 0);
-    }
-
-    #[test]
-    fn solve_universal_joint_mate() {
-        let mut assembly = Assembly::new();
-        assembly.add_part(make_box_part("part1"));
-        assembly.add_part(make_box_part("part2"));
-
-        // Component A at origin (will be grounded)
-        assembly.add_component(Component::new("comp1".into(), "part1".into(), "Box A".into()));
-        // Component B offset — solver should move it so axes intersect
-        assembly.add_component(
-            Component::new("comp2".into(), "part2".into(), "Box B".into())
-                .with_transform(transform::translation(2.0, 3.0, 4.0))
-        );
-
-        // Universal joint mate using face references.
-        // Face 0 has Z-normal, face 2 has a side normal (X or Y) — perpendicular axes.
-        assembly.mates.push(Mate {
-            id: "mate1".into(),
-            kind: MateKind::UniversalJoint,
-            component_a: "comp1".into(),
-            component_b: "comp2".into(),
-            geometry_ref_a: GeometryRef::Face(0), // bottom face, Z-normal axis
-            geometry_ref_b: GeometryRef::Face(2), // side face, perpendicular axis
-            suppressed: false,
-        });
-
-        let part_breps = evaluate_parts(&mut assembly);
-        let result = solve_assembly_mates(&mut assembly, &part_breps).unwrap();
-        assert!(result.converged, "Universal joint solver should converge, residual={:.6}", result.residual);
-        assert!(result.residual < 0.01,
-            "Universal joint residual should be near zero, got {:.6}", result.residual);
-    }
-
-    #[test]
-    fn universal_joint_point_coincidence_after_solve() {
-        // Unit test directly on the equation structs to verify point coincidence
-        use crate::solver::variable::Variable;
-
-        let mut vars = super::super::variable::VariableStore::new();
-
-        // comp_a grounded at origin, axis along Z through origin
-        let comp_a = ComponentVars {
-            tx: vars.add(Variable::fixed(0.0)),
-            ty: vars.add(Variable::fixed(0.0)),
-            tz: vars.add(Variable::fixed(0.0)),
-            rx: vars.add(Variable::fixed(0.0)),
-            ry: vars.add(Variable::fixed(0.0)),
-            rz: vars.add(Variable::fixed(0.0)),
-        };
-
-        // comp_b at origin, axis along X through origin — already satisfies constraints
-        let comp_b = ComponentVars {
-            tx: vars.add(Variable::new(0.0)),
-            ty: vars.add(Variable::new(0.0)),
-            tz: vars.add(Variable::new(0.0)),
-            rx: vars.add(Variable::new(0.0)),
-            ry: vars.add(Variable::new(0.0)),
-            rz: vars.add(Variable::new(0.0)),
-        };
-
-        let axis_a = AxisGeometry { point: Pt3::origin(), direction: Vec3::new(0.0, 0.0, 1.0) };
-        let axis_b = AxisGeometry { point: Pt3::origin(), direction: Vec3::new(1.0, 0.0, 0.0) };
-
-        // All 4 equations should be satisfied (axes intersect at origin, are perpendicular)
-        let eq_x = UniversalJointPointXEquation::new(comp_a, comp_b, axis_a.clone(), axis_b.clone());
-        let eq_y = UniversalJointPointYEquation::new(comp_a, comp_b, axis_a.clone(), axis_b.clone());
-        let eq_z = UniversalJointPointZEquation::new(comp_a, comp_b, axis_a.clone(), axis_b.clone());
-        let eq_twist = UniversalJointNoTwistEquation::new(comp_a, comp_b, axis_a, axis_b);
-
-        assert!(eq_x.eval(&vars).abs() < 1e-9, "X point coincidence");
-        assert!(eq_y.eval(&vars).abs() < 1e-9, "Y point coincidence");
-        assert!(eq_z.eval(&vars).abs() < 1e-9, "Z point coincidence");
-        assert!(eq_twist.eval(&vars).abs() < 1e-9, "No-twist (perpendicular axes)");
-    }
-
-    #[test]
-    fn universal_joint_retains_rotational_freedom() {
-        // Verify that each component can rotate about its own axis
-        // without violating the universal joint constraints.
-        use crate::solver::variable::Variable;
-
-        let mut vars = super::super::variable::VariableStore::new();
-
-        // comp_a grounded at origin, axis along Z
-        let comp_a = ComponentVars {
-            tx: vars.add(Variable::fixed(0.0)),
-            ty: vars.add(Variable::fixed(0.0)),
-            tz: vars.add(Variable::fixed(0.0)),
-            rx: vars.add(Variable::fixed(0.0)),
-            ry: vars.add(Variable::fixed(0.0)),
-            rz: vars.add(Variable::fixed(0.0)),
-        };
-
-        // comp_b at origin, axis along X, rotated 45 degrees about X axis
-        let comp_b = ComponentVars {
-            tx: vars.add(Variable::new(0.0)),
-            ty: vars.add(Variable::new(0.0)),
-            tz: vars.add(Variable::new(0.0)),
-            rx: vars.add(Variable::new(0.7)),  // rotation about X
-            ry: vars.add(Variable::new(0.0)),
-            rz: vars.add(Variable::new(0.0)),
-        };
-
-        let axis_a = AxisGeometry { point: Pt3::origin(), direction: Vec3::new(0.0, 0.0, 1.0) };
-        let axis_b = AxisGeometry { point: Pt3::origin(), direction: Vec3::new(1.0, 0.0, 0.0) };
-
-        // Point coincidence should still hold (rotation about own axis at origin stays at origin)
-        let eq_x = UniversalJointPointXEquation::new(comp_a, comp_b, axis_a.clone(), axis_b.clone());
-        let eq_y = UniversalJointPointYEquation::new(comp_a, comp_b, axis_a.clone(), axis_b.clone());
-        let eq_z = UniversalJointPointZEquation::new(comp_a, comp_b, axis_a.clone(), axis_b.clone());
-
-        assert!(eq_x.eval(&vars).abs() < 1e-9, "X should be zero after rotation about own axis");
-        assert!(eq_y.eval(&vars).abs() < 1e-9, "Y should be zero after rotation about own axis");
-        assert!(eq_z.eval(&vars).abs() < 1e-9, "Z should be zero after rotation about own axis");
-
-        // The no-twist constraint may or may not be satisfied depending on rotation,
-        // since rotating comp_b about X axis changes the world-space direction of the X axis.
-        // This is expected — the DOF is "rotation about own axis" which the solver permits
-        // by not over-constraining (only 4 equations for 6 DOF = 2 free DOF).
     }
 }
