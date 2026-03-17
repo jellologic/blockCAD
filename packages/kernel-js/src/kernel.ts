@@ -272,6 +272,9 @@ export class KernelClient {
   }
 
   removeFeature(index: number): void {
+    if (typeof this.handle.remove_feature !== "function") {
+      throw new KernelError("remove_feature not available in this WASM build", "not_implemented");
+    }
     try {
       this.handle.remove_feature(index);
     } catch (err) {
@@ -280,6 +283,9 @@ export class KernelClient {
   }
 
   renameFeature(index: number, name: string): void {
+    if (typeof this.handle.rename_feature !== "function") {
+      throw new KernelError("rename_feature not available in this WASM build", "not_implemented");
+    }
     try {
       this.handle.rename_feature(index, name);
     } catch (err) {
@@ -288,6 +294,9 @@ export class KernelClient {
   }
 
   moveFeature(from: number, to: number): void {
+    if (typeof this.handle.move_feature !== "function") {
+      throw new KernelError("move_feature not available in this WASM build", "not_implemented");
+    }
     try {
       this.handle.move_feature(from, to);
     } catch (err) {
@@ -296,6 +305,9 @@ export class KernelClient {
   }
 
   updateFeatureParams(index: number, params: FeatureParams): void {
+    if (typeof this.handle.update_feature_params !== "function") {
+      throw new KernelError("update_feature_params not available in this WASM build", "not_implemented");
+    }
     try {
       this.handle.update_feature_params(index, JSON.stringify(params));
     } catch (err) {
@@ -304,6 +316,9 @@ export class KernelClient {
   }
 
   rollbackTo(index: number): void {
+    if (typeof this.handle.rollback_to !== "function") {
+      throw new KernelError("rollback_to not available in this WASM build", "not_implemented");
+    }
     try {
       this.handle.rollback_to(index);
     } catch (err) {
@@ -312,6 +327,9 @@ export class KernelClient {
   }
 
   rollForward(): void {
+    if (typeof this.handle.roll_forward !== "function") {
+      throw new KernelError("roll_forward not available in this WASM build", "not_implemented");
+    }
     try {
       this.handle.roll_forward();
     } catch (err) {
@@ -377,6 +395,9 @@ export class KernelClient {
   }
 
   exportSTEP(options: StepExportOptions = {}, chordTolerance: number = 0.01, angleTolerance: number = 0.5): string {
+    if (typeof this.handle.export_step !== "function") {
+      throw new KernelError("export_step not available in this WASM build", "not_implemented");
+    }
     try {
       return this.handle.export_step(chordTolerance, angleTolerance, JSON.stringify(options));
     } catch (err) {
@@ -385,6 +406,9 @@ export class KernelClient {
   }
 
   computeMassProperties(density?: number, chordTolerance: number = 0.01, angleTolerance: number = 0.5): MassProperties {
+    if (typeof this.handle.compute_mass_properties !== "function") {
+      throw new KernelError("compute_mass_properties not available in this WASM build", "not_implemented");
+    }
     try {
       const json = this.handle.compute_mass_properties(chordTolerance, angleTolerance, density ?? 0);
       return JSON.parse(json);
