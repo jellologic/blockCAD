@@ -35,8 +35,19 @@ pub enum FeatureKind {
     MoveBody,
     ScaleBody,
 
+    // New operations (Batch 3)
+    HoleWizard,
+    Dome,
+    Rib,
+    SplitBody,
+    CombineBodies,
+    CurvePattern,
+
     // Reference geometry
     DatumPlane,
+    ReferenceAxis,
+    ReferencePoint,
+    CoordinateSystem,
 }
 
 impl FeatureKind {
@@ -63,7 +74,16 @@ impl FeatureKind {
             FeatureKind::FaceFillet => "Face Fillet",
             FeatureKind::MoveBody => "Move/Copy Body",
             FeatureKind::ScaleBody => "Scale Body",
+            FeatureKind::HoleWizard => "Hole Wizard",
+            FeatureKind::Dome => "Dome",
+            FeatureKind::Rib => "Rib",
+            FeatureKind::SplitBody => "Split Body",
+            FeatureKind::CombineBodies => "Combine Bodies",
+            FeatureKind::CurvePattern => "Curve Pattern",
             FeatureKind::DatumPlane => "Datum Plane",
+            FeatureKind::ReferenceAxis => "Reference Axis",
+            FeatureKind::ReferencePoint => "Reference Point",
+            FeatureKind::CoordinateSystem => "Coordinate System",
         }
     }
 

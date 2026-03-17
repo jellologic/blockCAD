@@ -309,9 +309,21 @@ fn split_polygon(
     }
 }
 
+/// Public wrapper around `split_polygon` for use by sibling modules (e.g. split).
+pub(crate) fn split_polygon_pub(
+    plane: &CsgPlane,
+    polygon: &CsgPolygon,
+    coplanar_front: &mut Vec<CsgPolygon>,
+    coplanar_back: &mut Vec<CsgPolygon>,
+    front: &mut Vec<CsgPolygon>,
+    back: &mut Vec<CsgPolygon>,
+) {
+    split_polygon(plane, polygon, coplanar_front, coplanar_back, front, back);
+}
+
 // ─── Boolean Operations ────────────────────────────────────────
 
-fn brep_to_polygons(brep: &BRep) -> KernelResult<Vec<CsgPolygon>> {
+pub(crate) fn brep_to_polygons(brep: &BRep) -> KernelResult<Vec<CsgPolygon>> {
     let face_polys = extract_face_polygons(brep)?;
     Ok(face_polys.into_iter().map(|(verts, normal)| {
         CsgPolygon { vertices: verts, normal }
@@ -431,7 +443,7 @@ fn resolve_t_junctions(polygons: &mut Vec<CsgPolygon>) {
     }
 }
 
-fn polygons_to_brep(polygons: &[CsgPolygon]) -> KernelResult<BRep> {
+pub(crate) fn polygons_to_brep(polygons: &[CsgPolygon]) -> KernelResult<BRep> {
     let mut polys: Vec<CsgPolygon> = polygons.iter()
         .filter(|p| p.vertices.len() >= 3)
         .cloned()

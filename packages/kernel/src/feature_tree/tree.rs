@@ -26,6 +26,8 @@ pub struct FeatureTree {
     pub sketch_profiles: HashMap<usize, ExtrudeProfile>,
     /// Computed datum planes, keyed by feature index.
     pub datum_planes: HashMap<usize, crate::geometry::surface::plane::Plane>,
+    /// Tool bodies for Combine Bodies operations, keyed by feature index.
+    pub tool_bodies: HashMap<usize, BRep>,
 }
 
 impl FeatureTree {
@@ -37,6 +39,7 @@ impl FeatureTree {
             sketches: HashMap::new(),
             sketch_profiles: HashMap::new(),
             datum_planes: HashMap::new(),
+            tool_bodies: HashMap::new(),
         }
     }
 

@@ -1,5 +1,6 @@
 pub mod bbox;
 pub mod curve;
+pub mod reference;
 pub mod serde_helpers;
 pub mod surface;
 pub mod transform;

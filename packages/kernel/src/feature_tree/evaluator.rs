@@ -632,6 +632,148 @@ pub fn evaluate(tree: &mut FeatureTree) -> KernelResult<BRep> {
                 tree.features_mut()[i].state = FeatureState::Evaluated;
             }
 
+            FeatureKind::HoleWizard => {
+                let params = match &tree.features()[i].params {
+                    FeatureParams::HoleWizard(p) => p.clone(),
+                    _ => {
+                        tree.features_mut()[i].state = FeatureState::Failed;
+                        return Err(KernelError::Operation {
+                            op: "evaluate".into(),
+                            detail: "HoleWizard feature has wrong params type".into(),
+                        });
+                    }
+                };
+                if matches!(current_brep.body, Body::Empty) {
+                    tree.features_mut()[i].state = FeatureState::Failed;
+                    return Err(KernelError::Operation {
+                        op: "evaluate".into(),
+                        detail: "Cannot create hole: no existing geometry".into(),
+                    });
+                }
+                current_brep = crate::operations::hole::hole_wizard(current_brep, &params)?;
+                tree.features_mut()[i].state = FeatureState::Evaluated;
+            }
+
+            FeatureKind::Dome => {
+                let params = match &tree.features()[i].params {
+                    FeatureParams::Dome(p) => p.clone(),
+                    _ => {
+                        tree.features_mut()[i].state = FeatureState::Failed;
+                        return Err(KernelError::Operation {
+                            op: "evaluate".into(),
+                            detail: "Dome feature has wrong params type".into(),
+                        });
+                    }
+                };
+                if matches!(current_brep.body, Body::Empty) {
+                    tree.features_mut()[i].state = FeatureState::Failed;
+                    return Err(KernelError::Operation {
+                        op: "evaluate".into(),
+                        detail: "Cannot dome: no existing geometry".into(),
+                    });
+                }
+                current_brep = crate::operations::dome::dome_face(&current_brep, &params)?;
+                tree.features_mut()[i].state = FeatureState::Evaluated;
+            }
+
+            FeatureKind::Rib => {
+                let params = match &tree.features()[i].params {
+                    FeatureParams::Rib(p) => p.clone(),
+                    _ => {
+                        tree.features_mut()[i].state = FeatureState::Failed;
+                        return Err(KernelError::Operation {
+                            op: "evaluate".into(),
+                            detail: "Rib feature has wrong params type".into(),
+                        });
+                    }
+                };
+                if matches!(current_brep.body, Body::Empty) {
+                    tree.features_mut()[i].state = FeatureState::Failed;
+                    return Err(KernelError::Operation {
+                        op: "evaluate".into(),
+                        detail: "Cannot rib: no existing geometry".into(),
+                    });
+                }
+                let profile = find_latest_sketch_profile(tree, i)?;
+                current_brep = crate::operations::rib::rib_from_profile(&current_brep, &profile, &params)?;
+                tree.features_mut()[i].state = FeatureState::Evaluated;
+            }
+
+            FeatureKind::SplitBody => {
+                let params = match &tree.features()[i].params {
+                    FeatureParams::SplitBody(p) => p.clone(),
+                    _ => {
+                        tree.features_mut()[i].state = FeatureState::Failed;
+                        return Err(KernelError::Operation {
+                            op: "evaluate".into(),
+                            detail: "SplitBody feature has wrong params type".into(),
+                        });
+                    }
+                };
+                if matches!(current_brep.body, Body::Empty) {
+                    tree.features_mut()[i].state = FeatureState::Failed;
+                    return Err(KernelError::Operation {
+                        op: "evaluate".into(),
+                        detail: "Cannot split: no existing geometry".into(),
+                    });
+                }
+                current_brep = crate::operations::boolean::split::split_body(&current_brep, &params)?;
+                tree.features_mut()[i].state = FeatureState::Evaluated;
+            }
+
+            FeatureKind::CombineBodies => {
+                let params = match &tree.features()[i].params {
+                    FeatureParams::CombineBodies(p) => p.clone(),
+                    _ => {
+                        tree.features_mut()[i].state = FeatureState::Failed;
+                        return Err(KernelError::Operation {
+                            op: "evaluate".into(),
+                            detail: "CombineBodies feature has wrong params type".into(),
+                        });
+                    }
+                };
+                if matches!(current_brep.body, Body::Empty) {
+                    tree.features_mut()[i].state = FeatureState::Failed;
+                    return Err(KernelError::Operation {
+                        op: "evaluate".into(),
+                        detail: "Cannot combine: no existing geometry".into(),
+                    });
+                }
+                let tool_body = match tree.tool_bodies.remove(&i) {
+                    Some(b) => b,
+                    None => BRep::new(),
+                };
+                current_brep = crate::operations::boolean::combine::combine_bodies(&current_brep, &tool_body, &params)?;
+                tree.features_mut()[i].state = FeatureState::Evaluated;
+            }
+
+            FeatureKind::CurvePattern => {
+                let params = match &tree.features()[i].params {
+                    FeatureParams::CurvePattern(p) => p.clone(),
+                    _ => {
+                        tree.features_mut()[i].state = FeatureState::Failed;
+                        return Err(KernelError::Operation {
+                            op: "evaluate".into(),
+                            detail: "CurvePattern feature has wrong params type".into(),
+                        });
+                    }
+                };
+                if matches!(current_brep.body, Body::Empty) {
+                    tree.features_mut()[i].state = FeatureState::Failed;
+                    return Err(KernelError::Operation {
+                        op: "evaluate".into(),
+                        detail: "Cannot pattern: no existing geometry".into(),
+                    });
+                }
+                current_brep = crate::operations::pattern::curve::curve_pattern(&current_brep, &params)?;
+                tree.features_mut()[i].state = FeatureState::Evaluated;
+            }
+
+            FeatureKind::ReferenceAxis | FeatureKind::ReferencePoint | FeatureKind::CoordinateSystem => {
+                // Reference geometry doesn't modify the BRep
+                tree.features_mut()[i].state = FeatureState::Evaluated;
+            }
+
             other => {
                 tree.features_mut()[i].state = FeatureState::Failed;
                 return Err(KernelError::Operation {

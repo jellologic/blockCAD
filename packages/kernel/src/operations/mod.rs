@@ -16,5 +16,8 @@ pub mod draft;
 pub mod datum_plane;
 pub mod transform;
 pub mod transform_body;
+pub mod hole;
+pub mod dome;
+pub mod rib;
 
 pub use traits::Operation;

@@ -37,6 +37,15 @@ pub enum FeatureParams {
     FaceFillet(crate::operations::fillet::FaceFilletParams),
     MoveBody(crate::operations::transform_body::MoveBodyParams),
     ScaleBody(crate::operations::transform::ScaleBodyParams),
+    HoleWizard(crate::operations::hole::HoleParams),
+    Dome(crate::operations::dome::DomeParams),
+    Rib(crate::operations::rib::RibParams),
+    SplitBody(crate::operations::boolean::split::SplitParams),
+    CombineBodies(crate::operations::boolean::combine::CombineParams),
+    CurvePattern(crate::operations::pattern::curve::CurvePatternParams),
+    ReferenceAxis(crate::geometry::reference::ReferenceAxisParams),
+    ReferencePoint(crate::geometry::reference::ReferencePointParams),
+    CoordinateSystem(crate::geometry::reference::CoordinateSystemParams),
 }
 
 #[cfg(test)]
