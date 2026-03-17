@@ -1,4 +1,4 @@
-import { useMemo, useCallback } from "react";
+import { useMemo, useCallback, useEffect, useRef, memo } from "react";
 import * as THREE from "three";
 import type { MeshData } from "@blockCAD/kernel";
 import type { ThreeEvent } from "@react-three/fiber";
@@ -8,6 +8,13 @@ interface ModelMeshProps {
   meshData: MeshData;
   wireframe?: boolean;
 }
+
+// Module-level selectors for stable references
+const selectMode = (s: any) => s.mode;
+const selectSelectedFaceIndex = (s: any) => s.selectedFaceIndex;
+const selectHoveredFaceIndex = (s: any) => s.hoveredFaceIndex;
+const selectSelectFace = (s: any) => s.selectFace;
+const selectHoverFace = (s: any) => s.hoverFace;
 
 /**
  * Renders a highlight overlay for the selected/hovered face.
@@ -25,6 +32,8 @@ function FaceHighlight({
   color: string;
   opacity: number;
 }) {
+  const geometryRef = useRef<THREE.BufferGeometry | null>(null);
+
   const geometry = useMemo(() => {
     const geo = new THREE.BufferGeometry();
 
@@ -67,14 +76,25 @@ function FaceHighlight({
       new THREE.BufferAttribute(new Float32Array(normArr), 3)
     );
 
+    geometryRef.current = geo;
     return geo;
+  }, [meshData, faceIndex]);
+
+  // Dispose geometry on unmount or when meshData/faceIndex changes
+  useEffect(() => {
+    return () => {
+      if (geometryRef.current) {
+        geometryRef.current.dispose();
+        geometryRef.current = null;
+      }
+    };
   }, [meshData, faceIndex]);
 
   if (!geometry) return null;
 
   return (
     <mesh geometry={geometry} renderOrder={1}>
-      <meshStandardMaterial
+      <meshPhongMaterial
         color={color}
         transparent
         opacity={opacity}
@@ -88,12 +108,13 @@ function FaceHighlight({
   );
 }
 
-export function ModelMesh({ meshData, wireframe = false }: ModelMeshProps) {
-  const mode = useEditorStore((s) => s.mode);
-  const selectedFaceIndex = useEditorStore((s) => s.selectedFaceIndex);
-  const hoveredFaceIndex = useEditorStore((s) => s.hoveredFaceIndex);
-  const selectFace = useEditorStore((s) => s.selectFace);
-  const hoverFace = useEditorStore((s) => s.hoverFace);
+export const ModelMesh = memo(function ModelMesh({ meshData, wireframe = false }: ModelMeshProps) {
+  const mode = useEditorStore(selectMode);
+  const selectedFaceIndex = useEditorStore(selectSelectedFaceIndex);
+  const hoveredFaceIndex = useEditorStore(selectHoveredFaceIndex);
+  const selectFace = useEditorStore(selectSelectFace);
+  const hoverFace = useEditorStore(selectHoverFace);
+  const geometryRef = useRef<THREE.BufferGeometry | null>(null);
 
   const geometry = useMemo(() => {
     const geo = new THREE.BufferGeometry();
@@ -104,7 +125,18 @@ export function ModelMesh({ meshData, wireframe = false }: ModelMeshProps) {
     geo.setAttribute("normal", new THREE.BufferAttribute(meshData.normals, 3));
     geo.setAttribute("uv", new THREE.BufferAttribute(meshData.uvs, 2));
     geo.setIndex(new THREE.BufferAttribute(meshData.indices, 1));
+    geometryRef.current = geo;
     return geo;
+  }, [meshData]);
+
+  // Dispose geometry when meshData changes or component unmounts
+  useEffect(() => {
+    return () => {
+      if (geometryRef.current) {
+        geometryRef.current.dispose();
+        geometryRef.current = null;
+      }
+    };
   }, [meshData]);
 
   const handlePointerMove = useCallback(
@@ -149,10 +181,10 @@ export function ModelMesh({ meshData, wireframe = false }: ModelMeshProps) {
         onPointerOut={handlePointerOut}
         onClick={handleClick}
       >
-        <meshStandardMaterial
+        <meshPhongMaterial
           color="#6b8cff"
-          metalness={0.1}
-          roughness={0.6}
+          shininess={40}
+          specular="#222244"
           wireframe={wireframe}
           side={THREE.DoubleSide}
           transparent={mode === "sketch"}
@@ -181,4 +213,4 @@ export function ModelMesh({ meshData, wireframe = false }: ModelMeshProps) {
       )}
     </group>
   );
-}
+});

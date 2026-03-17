@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useEffect, useRef, memo } from "react";
 import * as THREE from "three";
 import { useEditorStore } from "@/stores/editor-store";
 import type { SketchEntity2D, SketchPlane } from "@blockCAD/kernel";
@@ -66,9 +66,10 @@ function to3D(pt: { x: number; y: number }, plane: SketchPlane): THREE.Vector3 {
  * Renders a semi-transparent preview mesh of the extrude operation.
  * Shown in the viewport while the extrude panel is active.
  */
-export function ExtrudePreview() {
+export const ExtrudePreview = memo(function ExtrudePreview() {
   const activeOperation = useEditorStore((s) => s.activeOperation);
   const features = useEditorStore((s) => s.features);
+  const geometryRef = useRef<THREE.BufferGeometry | null>(null);
 
   const geometry = useMemo(() => {
     if (!activeOperation || (activeOperation.type !== "extrude" && activeOperation.type !== "cut_extrude")) return null;
@@ -245,7 +246,18 @@ export function ExtrudePreview() {
     const geo = new THREE.BufferGeometry();
     geo.setAttribute("position", new THREE.BufferAttribute(new Float32Array(positions), 3));
     geo.setAttribute("normal", new THREE.BufferAttribute(new Float32Array(normals), 3));
+    geometryRef.current = geo;
     return geo;
+  }, [activeOperation, features]);
+
+  // Dispose geometry when deps change or component unmounts
+  useEffect(() => {
+    return () => {
+      if (geometryRef.current) {
+        geometryRef.current.dispose();
+        geometryRef.current = null;
+      }
+    };
   }, [activeOperation, features]);
 
   if (!geometry) return null;
@@ -254,7 +266,7 @@ export function ExtrudePreview() {
 
   return (
     <mesh geometry={geometry} renderOrder={2}>
-      <meshStandardMaterial
+      <meshPhongMaterial
         color={isCut ? "#cc4444" : "#44cc88"}
         transparent
         opacity={0.35}
@@ -263,4 +275,4 @@ export function ExtrudePreview() {
       />
     </mesh>
   );
-}
+});

@@ -557,16 +557,26 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     set({ activeOperation: { type, params: defaultParams[type] || {} } });
   },
 
-  updateOperationParams: (params) => {
-    const { activeOperation } = get();
-    if (!activeOperation) return;
-    set({
-      activeOperation: {
-        ...activeOperation,
-        params: { ...activeOperation.params, ...params },
-      },
-    });
-  },
+  updateOperationParams: (() => {
+    let rafId: number | null = null;
+    let pendingParams: Record<string, any> = {};
+    return (params: Record<string, any>) => {
+      pendingParams = { ...pendingParams, ...params };
+      if (rafId !== null) cancelAnimationFrame(rafId);
+      rafId = requestAnimationFrame(() => {
+        const { activeOperation } = get();
+        if (!activeOperation) { pendingParams = {}; rafId = null; return; }
+        set({
+          activeOperation: {
+            ...activeOperation,
+            params: { ...activeOperation.params, ...pendingParams },
+          },
+        });
+        pendingParams = {};
+        rafId = null;
+      });
+    };
+  })(),
 
   confirmOperation: async () => {
     const { kernel, activeOperation, features: localFeatures } = get();

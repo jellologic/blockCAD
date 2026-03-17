@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { useRef, useEffect, memo } from "react";
 import { Canvas, useThree, useFrame } from "@react-three/fiber";
 import { OrbitControls, GizmoHelper, GizmoViewport, Html } from "@react-three/drei";
 import * as THREE from "three";
@@ -15,7 +15,7 @@ import type { SketchPlaneId } from "@blockCAD/kernel";
 function SketchCameraController() {
   const mode = useEditorStore((s) => s.mode);
   const planeId = useEditorStore((s) => s.sketchSession?.planeId);
-  const { camera } = useThree();
+  const { camera, invalidate } = useThree();
   const targetRef = useRef<THREE.Vector3 | null>(null);
 
   useFrame(() => {
@@ -46,6 +46,7 @@ function SketchCameraController() {
     camera.position.lerp(targetRef.current, 0.08);
     camera.lookAt(0, 0, 0);
     camera.updateProjectionMatrix();
+    invalidate();
   });
 
   return null;
@@ -55,7 +56,7 @@ function SketchCameraController() {
 function ViewOrientationController() {
   const cameraTarget = useEditorStore((s) => s.cameraTarget);
   const setCameraTarget = useEditorStore((s) => s.setCameraTarget);
-  const { camera } = useThree();
+  const { camera, invalidate } = useThree();
   const targetRef = useRef<THREE.Vector3 | null>(null);
 
   useFrame(() => {
@@ -72,6 +73,7 @@ function ViewOrientationController() {
     camera.position.lerp(targetRef.current, 0.1);
     camera.lookAt(0, 0, 0);
     camera.updateProjectionMatrix();
+    invalidate();
 
     // Clear target when close enough (animation complete)
     if (camera.position.distanceTo(targetRef.current) < 0.1) {
@@ -89,8 +91,29 @@ const PLANE_CONFIGS: { id: SketchPlaneId; label: string; rotation: [number, numb
   { id: "right", label: "Right", rotation: [0, Math.PI / 2, 0], color: "#ff4060", labelPos: [0, 6, -6] },
 ];
 
+/** Triggers a render when store state changes that affects the scene */
+function InvalidationController() {
+  const { invalidate } = useThree();
+  const meshData = useEditorStore((s) => s.meshData);
+  const hoveredFaceIndex = useEditorStore((s) => s.hoveredFaceIndex);
+  const selectedFaceIndex = useEditorStore((s) => s.selectedFaceIndex);
+  const hoveredPlaneId = useEditorStore((s) => s.hoveredPlaneId);
+  const mode = useEditorStore((s) => s.mode);
+  const activeOperation = useEditorStore((s) => s.activeOperation);
+  const wireframe = useEditorStore((s) => s.wireframe);
+  const showEdges = useEditorStore((s) => s.showEdges);
+  const sketchEntities = useEditorStore((s) => s.sketchSession?.entities.length ?? 0);
+  const sketchCursorPos = useEditorStore((s) => s.sketchSession?.cursorPos);
+
+  useEffect(() => {
+    invalidate();
+  }, [meshData, hoveredFaceIndex, selectedFaceIndex, hoveredPlaneId, mode, activeOperation, wireframe, showEdges, sketchEntities, sketchCursorPos, invalidate]);
+
+  return null;
+}
+
 /** Clickable reference planes shown in the viewport */
-function ReferencePlanes() {
+const ReferencePlanes = memo(function ReferencePlanes() {
   const mode = useEditorStore((s) => s.mode);
   const hoveredPlaneId = useEditorStore((s) => s.hoveredPlaneId);
   const hoverPlane = useEditorStore((s) => s.hoverPlane);
@@ -163,7 +186,7 @@ function ReferencePlanes() {
       })}
     </group>
   );
-}
+});
 
 export function CadViewport() {
   const meshData = useEditorStore((s) => s.meshData);
@@ -179,6 +202,7 @@ export function CadViewport() {
       <HeadsUpToolbar />
       <ConfirmationCorner />
       <Canvas
+        frameloop="demand"
         camera={{ position: [20, 15, 20], fov: 50, near: 0.1, far: 1000 }}
         style={{ background: "#3d3d40" }}
       >
@@ -236,6 +260,7 @@ export function CadViewport() {
           enableRotate={mode !== "sketch"}
         />
 
+        <InvalidationController />
         <SketchCameraController />
         <ViewOrientationController />
 
