@@ -1,5 +1,6 @@
 import { Check, X, Pencil } from "lucide-react";
 import { useEditorStore } from "@/stores/editor-store";
+import { SketchToolPanel } from "./sketch-tool-panel";
 
 const PLANE_NAMES: Record<string, string> = {
   front: "Front Plane",
@@ -115,6 +116,9 @@ export function SketchPropertyPanel() {
           <p className="text-xs" style={{ color: statusColor }}>{status}</p>
         </div>
       </div>
+
+      {/* Tool-specific parameter panel */}
+      <SketchToolPanel />
     </div>
   );
 }

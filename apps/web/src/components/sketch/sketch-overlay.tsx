@@ -752,6 +752,19 @@ function ToolLabel({ plane }: { plane: SketchPlane }) {
     arc: "Arc",
     dimension: "Dim",
     measure: "Measure",
+    ellipse: "Ellipse",
+    polygon: "Polygon",
+    slot: "Slot",
+    trim: "Trim",
+    extend: "Extend",
+    offset: "Offset",
+    mirror: "Mirror",
+    "sketch-fillet": "Fillet",
+    "sketch-chamfer": "Chamfer",
+    "sketch-linear-pattern": "Lin Pattern",
+    "sketch-circular-pattern": "Circ Pattern",
+    "convert-entities": "Convert",
+    block: "Block",
   };
   const name = toolNames[activeTool] ?? activeTool;
   const worldPos = sketchToWorld({ x: cursorPos.x + 1, y: cursorPos.y - 1 }, plane);

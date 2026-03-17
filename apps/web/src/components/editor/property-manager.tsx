@@ -3,11 +3,20 @@ import { useEditorStore } from "@/stores/editor-store";
 import { ExtrudePanel } from "./extrude-panel";
 import { RevolvePanel } from "./revolve-panel";
 import { FilletPanel } from "./fillet-panel";
+import { VariableFilletPanel } from "./variable-fillet-panel";
+import { FaceFilletPanel } from "./face-fillet-panel";
 import { ChamferPanel } from "./chamfer-panel";
 import { LinearPatternPanel } from "./linear-pattern-panel";
 import { CircularPatternPanel } from "./circular-pattern-panel";
 import { MirrorPanel } from "./mirror-panel";
 import { ShellPanel } from "./shell-panel";
+import { HoleWizardPanel } from "./hole-wizard-panel";
+import { MoveCopyPanel } from "./move-copy-panel";
+import { ScalePanel } from "./scale-panel";
+import { SweepPanel } from "./sweep-panel";
+import { LoftPanel } from "./loft-panel";
+import { DomePanel } from "./dome-panel";
+import { RibPanel } from "./rib-panel";
 
 export function PropertyManager() {
   const activeOperation = useEditorStore((s) => s.activeOperation);
@@ -22,11 +31,20 @@ export function PropertyManager() {
     revolve: "Revolve",
     cut_revolve: "Cut Revolve",
     fillet: "Fillet",
+    variable_fillet: "Variable Fillet",
+    face_fillet: "Face Fillet",
     chamfer: "Chamfer",
     linear_pattern: "Linear Pattern",
     circular_pattern: "Circular Pattern",
     mirror: "Mirror",
     shell: "Shell",
+    hole_wizard: "Hole Wizard",
+    move_copy: "Move/Copy Body",
+    scale: "Scale Body",
+    sweep: "Sweep",
+    loft: "Loft",
+    dome: "Dome",
+    rib: "Rib",
   };
   const title = displayNames[activeOperation.type] ??
     activeOperation.type.charAt(0).toUpperCase() + activeOperation.type.slice(1);
@@ -61,11 +79,20 @@ export function PropertyManager() {
         {(activeOperation.type === "extrude" || activeOperation.type === "cut_extrude") && <ExtrudePanel />}
         {(activeOperation.type === "revolve" || activeOperation.type === "cut_revolve") && <RevolvePanel />}
         {activeOperation.type === "fillet" && <FilletPanel />}
+        {activeOperation.type === "variable_fillet" && <VariableFilletPanel />}
+        {activeOperation.type === "face_fillet" && <FaceFilletPanel />}
         {activeOperation.type === "chamfer" && <ChamferPanel />}
         {activeOperation.type === "linear_pattern" && <LinearPatternPanel />}
         {activeOperation.type === "circular_pattern" && <CircularPatternPanel />}
         {activeOperation.type === "mirror" && <MirrorPanel />}
         {activeOperation.type === "shell" && <ShellPanel />}
+        {activeOperation.type === "hole_wizard" && <HoleWizardPanel />}
+        {activeOperation.type === "move_copy" && <MoveCopyPanel />}
+        {activeOperation.type === "scale" && <ScalePanel />}
+        {activeOperation.type === "sweep" && <SweepPanel />}
+        {activeOperation.type === "loft" && <LoftPanel />}
+        {activeOperation.type === "dome" && <DomePanel />}
+        {activeOperation.type === "rib" && <RibPanel />}
       </div>
     </div>
   );

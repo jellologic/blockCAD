@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import type {
   MeshData,
+  MassProperties,
   FeatureEntry,
   FeatureKind,
   SketchPlane,
@@ -198,6 +199,13 @@ interface EditorState {
   exportOBJ: () => void;
   export3MF: () => void;
   exportGLB: () => void;
+  exportSTEP: (options?: { schema?: string; author?: string; organization?: string }) => void;
+
+  // Mass properties
+  massProperties: MassProperties | null;
+  showMassProperties: boolean;
+  computeMassProperties: () => void;
+  setShowMassProperties: (show: boolean) => void;
 }
 
 function getPlane(planeId: SketchPlaneId): SketchPlane {
@@ -232,6 +240,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   sketchHistory: [],
   sketchRedoStack: [],
   sketchUndoBatching: false,
+  massProperties: null,
+  showMassProperties: false,
 
   initKernel: async () => {
     try {
@@ -282,10 +292,20 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         get().updateOperationParams({ from_face_index: index });
       }
     }
-    // If fillet/chamfer operation is active, derive edge indices from face selection.
+    // If face_fillet is active, toggle face indices
+    if (activeOperation && activeOperation.type === "face_fillet") {
+      if (index != null) {
+        const currentFaces: number[] = activeOperation.params.face_indices || [];
+        const next = currentFaces.includes(index)
+          ? currentFaces.filter((i: number) => i !== index)
+          : [...currentFaces, index];
+        get().updateOperationParams({ face_indices: next });
+      }
+    }
+    // If fillet/chamfer/variable_fillet operation is active, derive edge indices from face selection.
     // Each face of a box-like solid has edges shared with adjacent faces.
     // We map face index → the edges that border that face in the BRep.
-    if (activeOperation && (activeOperation.type === "fillet" || activeOperation.type === "chamfer")) {
+    if (activeOperation && (activeOperation.type === "fillet" || activeOperation.type === "chamfer" || activeOperation.type === "variable_fillet")) {
       if (index != null) {
         const currentEdges: number[] = activeOperation.params.edge_indices || [];
         // For a simple extruded box, edges are indexed 0–11.
@@ -313,6 +333,10 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         }
         get().updateOperationParams({ edge_indices: Array.from(edgeSet) });
       }
+    }
+    // If dome operation is active, set the face_index from face selection
+    if (activeOperation && activeOperation.type === "dome" && index != null) {
+      get().updateOperationParams({ face_index: index });
     }
   },
   hoverFace: (index) => set({ hoveredFaceIndex: index }),
@@ -464,6 +488,71 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         faces_to_remove: [],
         thickness: 1,
       },
+      variable_fillet: {
+        edge_indices: [],
+        control_points: [
+          { parameter: 0, radius: 1 },
+          { parameter: 1, radius: 1 },
+        ],
+        smooth_transition: true,
+      },
+      face_fillet: {
+        face_indices: [],
+        radius: 1,
+      },
+      hole_wizard: {
+        hole_type: "simple",
+        diameter: 5,
+        depth: 10,
+        through_all: false,
+        position: [0, 0, 0],
+        direction: [0, -1, 0],
+        cbore_diameter: 8,
+        cbore_depth: 3,
+        csink_diameter: 10,
+        csink_angle: 82,
+      },
+      move_copy: {
+        transform_type: "translate",
+        translate_x: 0,
+        translate_y: 0,
+        translate_z: 0,
+        rotate_axis_direction: [0, 0, 1],
+        rotate_angle: 0,
+        rotate_center: [0, 0, 0],
+        copy: false,
+      },
+      scale: {
+        uniform: true,
+        scale_factor: 1,
+        scale_x: 1,
+        scale_y: 1,
+        scale_z: 1,
+        center: [0, 0, 0],
+        copy: false,
+      },
+      sweep: {
+        guide_curves: [],
+        orientation: "FollowPath",
+        total_twist: 0,
+      },
+      loft: {
+        guide_curves: [],
+        start_tangency: { type: "None" },
+        end_tangency: { type: "None" },
+      },
+      dome: {
+        face_index: null,
+        height: 5,
+        elliptical: false,
+        direction: null,
+      },
+      rib: {
+        thickness: 1,
+        direction: [0, 0, 1],
+        flip: false,
+        both_sides: false,
+      },
     };
     set({ activeOperation: { type, params: defaultParams[type] || {} } });
   },
@@ -484,7 +573,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     if (!kernel || !activeOperation) return;
 
     // For extrude/cut_extrude/revolve/cut_revolve: use a fresh kernel to avoid WASM borrow conflicts
-    if (activeOperation.type === "extrude" || activeOperation.type === "cut_extrude" || activeOperation.type === "revolve" || activeOperation.type === "cut_revolve" || activeOperation.type === "fillet" || activeOperation.type === "chamfer" || activeOperation.type === "linear_pattern" || activeOperation.type === "circular_pattern" || activeOperation.type === "mirror" || activeOperation.type === "shell") {
+    if (activeOperation.type === "extrude" || activeOperation.type === "cut_extrude" || activeOperation.type === "revolve" || activeOperation.type === "cut_revolve" || activeOperation.type === "fillet" || activeOperation.type === "variable_fillet" || activeOperation.type === "face_fillet" || activeOperation.type === "chamfer" || activeOperation.type === "linear_pattern" || activeOperation.type === "circular_pattern" || activeOperation.type === "mirror" || activeOperation.type === "shell" || activeOperation.type === "hole_wizard" || activeOperation.type === "move_copy" || activeOperation.type === "scale" || activeOperation.type === "sweep" || activeOperation.type === "loft" || activeOperation.type === "dome" || activeOperation.type === "rib") {
       const hasSketch = localFeatures.some((f) => f.type === "sketch" && f.params.type === "sketch");
       if (!hasSketch) {
         toast.error(`Cannot ${activeOperation.type}: no sketch found. Draw a sketch first.`);
@@ -498,11 +587,20 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         revolve: "Revolve",
         cut_revolve: "Cut Revolve",
         fillet: "Fillet",
+        variable_fillet: "Variable Fillet",
+        face_fillet: "Face Fillet",
         chamfer: "Chamfer",
         linear_pattern: "Linear Pattern",
         circular_pattern: "Circular Pattern",
         mirror: "Mirror",
         shell: "Shell",
+        hole_wizard: "Hole Wizard",
+        move_copy: "Move/Copy",
+        scale: "Scale",
+        sweep: "Sweep",
+        loft: "Loft",
+        dome: "Dome",
+        rib: "Rib",
       }[activeOperation.type] || "Feature";
 
       // Create a fresh KernelClient to avoid "recursive use" wasm-bindgen error
@@ -1022,5 +1120,36 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     } catch (err) {
       toast.error("Export failed: " + (err instanceof Error ? err.message : String(err)));
     }
+  },
+
+  exportSTEP: (options = {}) => {
+    const { kernel } = get();
+    if (!kernel) { toast.error("No model loaded"); return; }
+    try {
+      const text = kernel.exportSTEP(options);
+      downloadFile(text, "model.step", "application/step");
+      toast.success("STEP exported");
+    } catch (err) {
+      toast.error("Export failed: " + (err instanceof Error ? err.message : String(err)));
+    }
+  },
+
+  computeMassProperties: () => {
+    const { kernel } = get();
+    if (!kernel) { toast.error("No model loaded"); return; }
+    try {
+      const props = kernel.massProperties();
+      set({ massProperties: props });
+    } catch (err) {
+      toast.error("Mass properties failed: " + (err instanceof Error ? err.message : String(err)));
+    }
+  },
+
+  setShowMassProperties: (show) => {
+    if (show) {
+      // Auto-compute when opening
+      get().computeMassProperties();
+    }
+    set({ showMassProperties: show });
   },
 }));

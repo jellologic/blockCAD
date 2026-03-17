@@ -1,6 +1,6 @@
 import { KernelHandle } from "@blockCAD/kernel-wasm";
 import { parseMeshBytes, type MeshData } from "./mesh";
-import type { FeatureEntry, FeatureParams, SketchFeatureData, RustSketchFeatureData, RustEntityStore, RustPlane, SketchPlane } from "./types";
+import type { FeatureEntry, FeatureParams, SketchFeatureData, RustSketchFeatureData, RustEntityStore, RustPlane, SketchPlane, StepExportOptions, MassProperties } from "./types";
 import { KernelError } from "./errors";
 
 /**
@@ -311,6 +311,23 @@ export class KernelClient {
       const buffer = new Uint8Array(bytes.byteLength);
       buffer.set(bytes);
       return buffer;
+    } catch (err) {
+      throw KernelError.fromWasm(String(err));
+    }
+  }
+
+  exportSTEP(options: StepExportOptions = {}, chordTolerance: number = 0.01, angleTolerance: number = 0.5): string {
+    try {
+      return this.handle.export_step(chordTolerance, angleTolerance, JSON.stringify(options));
+    } catch (err) {
+      throw KernelError.fromWasm(String(err));
+    }
+  }
+
+  computeMassProperties(density?: number, chordTolerance: number = 0.01, angleTolerance: number = 0.5): MassProperties {
+    try {
+      const json = this.handle.compute_mass_properties(chordTolerance, angleTolerance, density ?? 0);
+      return JSON.parse(json);
     } catch (err) {
       throw KernelError.fromWasm(String(err));
     }

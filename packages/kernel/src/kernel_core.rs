@@ -151,6 +151,34 @@ impl KernelCore {
         crate::export::gltf::export_glb(&mesh, &self.name, &options)
     }
 
+    /// Export as STEP (ISO 10303-21) string.
+    pub fn export_step(
+        &mut self,
+        _chord_tolerance: f64,
+        _angle_tolerance: f64,
+        options_json: &str,
+    ) -> KernelResult<String> {
+        let options: crate::export::StepExportOptions = serde_json::from_str(options_json).unwrap_or_default();
+        let brep = evaluate(&mut self.tree)?;
+        crate::export::step::export_step(&brep, &options)
+    }
+
+    /// Compute mass properties from the current model state.
+    /// If density is provided, inertia values are scaled accordingly.
+    pub fn compute_mass_properties(
+        &mut self,
+        chord_tolerance: f64,
+        angle_tolerance: f64,
+        density: Option<f64>,
+    ) -> KernelResult<crate::tessellation::MassProperties> {
+        let mesh = self.build_mesh(chord_tolerance, angle_tolerance)?;
+        let props = match density {
+            Some(d) => crate::tessellation::compute_mass_properties_with_density(&mesh, d),
+            None => crate::tessellation::compute_mass_properties(&mesh),
+        };
+        Ok(props)
+    }
+
     /// Get the feature list as JSON.
     pub fn get_features_json(&self) -> KernelResult<String> {
         serde_json::to_string(self.tree.features())

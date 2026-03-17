@@ -166,7 +166,10 @@ export function useKeyboardShortcuts() {
 
         case "e":
         case "E":
-          if (!activeOperation && mode !== "sketch" && !e.ctrlKey && !e.metaKey) {
+          if (mode === "sketch" && !e.ctrlKey && !e.metaKey) {
+            setSketchTool("extend");
+            e.preventDefault();
+          } else if (!activeOperation && mode !== "sketch" && !e.ctrlKey && !e.metaKey) {
             startOperation("extrude");
             e.preventDefault();
           }

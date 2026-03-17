@@ -150,6 +150,34 @@ impl KernelHandle {
             .map_err(|e| e.into())
     }
 
+    /// Export as STEP (ISO 10303-21) string.
+    pub fn export_step(
+        &mut self,
+        chord_tolerance: f64,
+        angle_tolerance: f64,
+        options_json: &str,
+    ) -> Result<String, JsValue> {
+        self.core
+            .export_step(chord_tolerance, angle_tolerance, options_json)
+            .map_err(|e| e.into())
+    }
+
+    /// Compute mass properties (volume, surface area, center of mass, inertia tensor).
+    /// Returns JSON-serialized MassProperties. If density > 0, inertia is scaled.
+    pub fn compute_mass_properties(
+        &mut self,
+        chord_tolerance: f64,
+        angle_tolerance: f64,
+        density: f64,
+    ) -> Result<String, JsValue> {
+        let density_opt = if density > 0.0 { Some(density) } else { None };
+        let props = self.core
+            .compute_mass_properties(chord_tolerance, angle_tolerance, density_opt)
+            .map_err(|e| -> JsValue { e.into() })?;
+        serde_json::to_string(&props)
+            .map_err(|e| JsValue::from_str(&e.to_string()))
+    }
+
     // --- Server-only operations ---
 
     #[cfg(feature = "server")]

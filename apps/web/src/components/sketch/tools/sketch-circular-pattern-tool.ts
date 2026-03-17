@@ -2,7 +2,15 @@ import type { SketchPoint2D } from "@blockCAD/kernel";
 import { useEditorStore } from "@/stores/editor-store";
 import { getLineEndpoints } from "./geometry-utils";
 
-const DEFAULT_COUNT = 4;
+let patternCount = 4;
+
+export function setCircularPatternCount(n: number): void {
+  patternCount = Math.max(2, Math.round(n));
+}
+
+export function getCircularPatternCount(): number {
+  return patternCount;
+}
 
 /**
  * Sketch circular pattern: click a line, then click a center point.
@@ -48,11 +56,11 @@ export function handleSketchCircularPatternClick(pos: SketchPoint2D): void {
   if (!endpoints) { store.clearPendingPoints(); return; }
 
   const center = pos; // Second click = rotation center
-  const angleStep = (2 * Math.PI) / DEFAULT_COUNT;
+  const angleStep = (2 * Math.PI) / patternCount;
 
   store.beginUndoBatch();
 
-  for (let i = 1; i < DEFAULT_COUNT; i++) {
+  for (let i = 1; i < patternCount; i++) {
     const angle = angleStep * i;
     const cosA = Math.cos(angle);
     const sinA = Math.sin(angle);

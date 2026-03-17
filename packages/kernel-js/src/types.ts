@@ -15,7 +15,24 @@ export type ClientFeatureKind =
   | "linear_pattern"
   | "circular_pattern"
   | "mirror"
-  | "shell";
+  | "shell"
+  // Batch 2
+  | "variable_fillet"
+  | "face_fillet"
+  | "move_body"
+  | "scale_body"
+  // Batch 3
+  | "hole_wizard"
+  | "dome"
+  | "rib"
+  | "split_body"
+  | "combine_bodies"
+  | "curve_pattern"
+  // Reference geometry
+  | "datum_plane"
+  | "reference_axis"
+  | "reference_point"
+  | "coordinate_system";
 
 // Server-only feature kinds
 export type ServerFeatureKind =
@@ -105,6 +122,191 @@ export interface MirrorParams {
 export interface ShellParams {
   faces_to_remove: number[];
   thickness: number;
+}
+
+// --- Batch 2 param types ---
+
+/** A control point specifying fillet radius at a position along an edge. */
+export interface RadiusPoint {
+  /** Parameter along edge, 0.0 = start, 1.0 = end. */
+  parameter: number;
+  /** Fillet radius at this parameter. */
+  radius: number;
+}
+
+export interface VariableFilletParams {
+  edge_indices: number[];
+  /** At least 2 radius control points (start and end), sorted by parameter. */
+  radius_points: RadiusPoint[];
+  /** If true, use cubic interpolation; otherwise linear. */
+  smooth_transition: boolean;
+}
+
+export interface FaceFilletParams {
+  face_indices: number[];
+  radius: number;
+}
+
+/** Spatial transformation kind (internally tagged via "kind" field). */
+export type TransformKind =
+  | { kind: "translate"; delta: Vec3 }
+  | { kind: "rotate"; axis: Vec3; angle: number; center: Point3 }
+  | { kind: "translate_rotate"; delta: Vec3; axis: Vec3; angle: number; center: Point3 };
+
+export interface MoveBodyParams {
+  transform: TransformKind;
+  /** If true, create a copy (union of original + transformed). */
+  copy: boolean;
+}
+
+export interface ScaleBodyParams {
+  /** Uniform scale factor (must be > 0). */
+  scale_factor: number;
+  /** Center point for scaling. Defaults to origin if omitted. */
+  center?: Point3;
+  /** Non-uniform scale factors (x, y, z). Overrides scale_factor when present. */
+  non_uniform?: Vec3;
+  /** If true, keep original body and union the scaled copy. */
+  copy: boolean;
+}
+
+// --- Batch 3 param types ---
+
+/** Hole type for hole wizard. */
+export type HoleType =
+  | "Simple"
+  | { Counterbore: { cbore_diameter: number; cbore_depth: number } }
+  | { Countersink: { csink_diameter: number; csink_angle: number } };
+
+export interface HoleParams {
+  hole_type: HoleType;
+  diameter: number;
+  depth: number;
+  position: Point3;
+  direction: Vec3;
+  through_all: boolean;
+}
+
+export interface DomeParams {
+  face_index: number;
+  height: number;
+  elliptical: boolean;
+  direction?: Vec3;
+}
+
+export interface RibParams {
+  thickness: number;
+  direction: Vec3;
+  flip: boolean;
+  both_sides: boolean;
+}
+
+export type SplitKeep = "Above" | "Below" | "Both";
+
+export interface SplitParams {
+  plane_origin: Point3;
+  plane_normal: Vec3;
+  keep: SplitKeep;
+}
+
+export type CombineOperation = "Add" | "Subtract" | "Common";
+
+export interface CombineParams {
+  operation: CombineOperation;
+}
+
+export interface CurvePatternParams {
+  curve_points: Point3[];
+  count: number;
+  equal_spacing: boolean;
+  align_to_curve: boolean;
+}
+
+// --- Reference geometry param types ---
+
+/** How a datum plane is defined (internally tagged via serde rename_all snake_case). */
+export type DatumPlaneKind =
+  | { kind: "offset"; distance: number }
+  | { kind: "angle"; axis: [number, number, number]; angle: number }
+  | { kind: "three_point"; p1: [number, number, number]; p2: [number, number, number]; p3: [number, number, number] }
+  | { kind: "face_plane"; face_index: number };
+
+export interface DatumPlaneParams {
+  kind: DatumPlaneKind;
+  /** Base plane index (for offset/angle). None = standard XY plane. */
+  base_plane_index?: number;
+}
+
+export interface ReferenceAxisParams {
+  origin: Point3;
+  direction: Vec3;
+}
+
+export interface ReferencePointParams {
+  position: Point3;
+}
+
+export interface CoordinateSystemParams {
+  origin: Point3;
+  x_axis: Vec3;
+  y_axis: Vec3;
+  z_axis: Vec3;
+}
+
+// --- Server-only operation param types ---
+
+export interface DraftParams {
+  face_indices: number[];
+  pull_direction: Vec3;
+  /** Draft angle in radians. */
+  angle: number;
+}
+
+export interface SweepParams {
+  segments?: number;
+  /** Twist angle along the sweep (radians). */
+  twist: number;
+  guide_curves?: Array<{ points: Point3[] }>;
+  orientation?: SweepOrientation;
+}
+
+export type SweepOrientation =
+  | { mode: "follow_path" }
+  | { mode: "keep_normal" }
+  | { mode: "follow_path_and_guide" }
+  | { mode: "twist_along_path"; total_twist: number };
+
+export interface LoftParams {
+  slices_per_span?: number;
+  closed?: boolean;
+  guide_curves?: Array<{ points: Point3[] }>;
+  start_tangency?: TangencyCondition;
+  end_tangency?: TangencyCondition;
+}
+
+export type TangencyCondition =
+  | "None"
+  | "Normal"
+  | { Direction: Vec3 }
+  | { Weight: { direction: Vec3; weight: number } };
+
+// --- Extended result types ---
+
+export interface StepExportOptions {
+  schema: "AP203" | "AP214";
+  author: string;
+  organization: string;
+}
+
+export interface MassProperties {
+  volume: number;
+  surface_area: number;
+  center_of_mass: Point3;
+  inertia_tensor: number[][];
+  principal_moments: Vec3;
+  principal_axes: number[][];
+  bbox_min: Point3;
+  bbox_max: Point3;
 }
 
 // --- Sketch 2D types ---
@@ -202,7 +404,28 @@ export type FeatureParams =
   | { type: "circular_pattern"; params: CircularPatternParams }
   | { type: "mirror"; params: MirrorParams }
   | { type: "shell"; params: ShellParams }
-  // Server-only params stored as opaque JSON
+  // Batch 2
+  | { type: "variable_fillet"; params: VariableFilletParams }
+  | { type: "face_fillet"; params: FaceFilletParams }
+  | { type: "move_body"; params: MoveBodyParams }
+  | { type: "scale_body"; params: ScaleBodyParams }
+  // Batch 3
+  | { type: "hole_wizard"; params: HoleParams }
+  | { type: "dome"; params: DomeParams }
+  | { type: "rib"; params: RibParams }
+  | { type: "split_body"; params: SplitParams }
+  | { type: "combine_bodies"; params: CombineParams }
+  | { type: "curve_pattern"; params: CurvePatternParams }
+  // Reference geometry
+  | { type: "datum_plane"; params: DatumPlaneParams }
+  | { type: "reference_axis"; params: ReferenceAxisParams }
+  | { type: "reference_point"; params: ReferencePointParams }
+  | { type: "coordinate_system"; params: CoordinateSystemParams }
+  // Server-only operations
+  | { type: "draft"; params: DraftParams }
+  | { type: "sweep"; params: SweepParams }
+  | { type: "loft"; params: LoftParams }
+  // Fallback for unknown server-only params
   | { type: ServerFeatureKind; params: Record<string, unknown> };
 
 export interface DocumentMetadata {

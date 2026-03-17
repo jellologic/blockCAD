@@ -5,7 +5,7 @@ use crate::topology::{BRep, Body};
 use std::fmt::Write;
 
 /// STEP application protocol selection.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum StepSchema {
     /// AP203: Configuration controlled 3D design
     AP203,
@@ -14,7 +14,7 @@ pub enum StepSchema {
 }
 
 /// Options for STEP export.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StepExportOptions {
     pub schema: StepSchema,
     pub author: String,

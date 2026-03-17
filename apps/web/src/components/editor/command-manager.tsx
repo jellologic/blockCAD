@@ -6,7 +6,10 @@ import {
   Download, Plus, Link, FileText, Combine,
   Scissors, ArrowUpRight, Copy, FlipHorizontal,
   Hexagon, Disc, Group, Ungroup,
+  CircleDot, Move, Scaling, Umbrella, AlignVerticalSpaceBetween, Scale,
 } from "lucide-react";
+import { StepExportDialog } from "@/components/export/step-export-dialog";
+import { MassPropertiesPanel } from "@/components/analysis/mass-properties-panel";
 import { RibbonButton } from "./ribbon-button";
 import { useEditorStore } from "@/stores/editor-store";
 import { useAssemblyStore } from "@/stores/assembly-store";
@@ -75,6 +78,10 @@ export function CommandManager() {
   const export3MF = useEditorStore((s) => s.export3MF);
   const exportGLB = useEditorStore((s) => s.exportGLB);
   const hasMesh = useEditorStore((s) => s.meshData !== null);
+  const showMassProperties = useEditorStore((s) => s.showMassProperties);
+  const setShowMassProperties = useEditorStore((s) => s.setShowMassProperties);
+
+  const [showStepDialog, setShowStepDialog] = useState(false);
 
   // Assembly store
   const isAssemblyMode = useAssemblyStore((s) => s.isAssemblyMode);
@@ -151,11 +158,24 @@ export function CommandManager() {
                 <RibbonButton icon={RotateCw} label="Revolve" shortcut="V" onClick={() => startOperation("revolve")} />
                 <RibbonButton icon={RotateCw} label="Cut" shortcut="" testId="ribbon-cut-revolve" onClick={() => startOperation("cut_revolve")} />
               </RibbonGroup>
+              <RibbonGroup label="Sweep/Loft">
+                <RibbonButton icon={Spline} label="Sweep" testId="ribbon-sweep" onClick={() => startOperation("sweep")} />
+                <RibbonButton icon={Layers} label="Loft" testId="ribbon-loft" onClick={() => startOperation("loft")} />
+              </RibbonGroup>
               <RibbonGroup label="Modify">
                 <div className="flex flex-col gap-0.5">
                   <RibbonButton icon={Circle} label="Fillet" size="small" shortcut="G" onClick={() => startOperation("fillet")} />
                   <RibbonButton icon={Octagon} label="Chamfer" size="small" shortcut="H" onClick={() => startOperation("chamfer")} />
                   <RibbonButton icon={Box} label="Shell" size="small" onClick={() => startOperation("shell")} />
+                </div>
+                <div className="flex flex-col gap-0.5">
+                  <RibbonButton icon={Circle} label="Var Fillet" size="small" testId="ribbon-variable-fillet" onClick={() => startOperation("variable_fillet")} />
+                  <RibbonButton icon={Circle} label="Face Fillet" size="small" testId="ribbon-face-fillet" onClick={() => startOperation("face_fillet")} />
+                  <RibbonButton icon={CircleDot} label="Hole Wizard" size="small" testId="ribbon-hole-wizard" onClick={() => startOperation("hole_wizard")} />
+                </div>
+                <div className="flex flex-col gap-0.5">
+                  <RibbonButton icon={Umbrella} label="Dome" size="small" onClick={() => startOperation("dome")} />
+                  <RibbonButton icon={AlignVerticalSpaceBetween} label="Rib" size="small" onClick={() => startOperation("rib")} />
                 </div>
               </RibbonGroup>
               <RibbonGroup label="Pattern">
@@ -163,6 +183,12 @@ export function CommandManager() {
                   <RibbonButton icon={Grid3x3} label="Linear" size="small" onClick={() => startOperation("linear_pattern")} />
                   <RibbonButton icon={RefreshCw} label="Circular" size="small" onClick={() => startOperation("circular_pattern")} />
                   <RibbonButton icon={FlipHorizontal2} label="Mirror" size="small" onClick={() => startOperation("mirror")} />
+                </div>
+              </RibbonGroup>
+              <RibbonGroup label="Transform">
+                <div className="flex flex-col gap-0.5">
+                  <RibbonButton icon={Move} label="Move/Copy" size="small" testId="ribbon-move-copy" onClick={() => startOperation("move_copy")} />
+                  <RibbonButton icon={Scaling} label="Scale" size="small" testId="ribbon-scale" onClick={() => startOperation("scale")} />
                 </div>
               </RibbonGroup>
             </>
@@ -243,14 +269,14 @@ export function CommandManager() {
               </RibbonGroup>
               <RibbonGroup label="Modify">
                 <div className="flex flex-col gap-0.5">
-                  <RibbonButton icon={Scissors} label="Trim" size="small" disabled={mode !== "sketch"} testId="tool-trim" active={sketchSession?.activeTool === "trim"} onClick={() => setSketchTool("trim")} />
-                  <RibbonButton icon={ArrowUpRight} label="Extend" size="small" disabled={mode !== "sketch"} testId="tool-extend" active={sketchSession?.activeTool === "extend"} onClick={() => setSketchTool("extend")} />
-                  <RibbonButton icon={Copy} label="Offset" size="small" disabled={mode !== "sketch"} testId="tool-offset" active={sketchSession?.activeTool === "offset"} onClick={() => setSketchTool("offset")} />
+                  <RibbonButton icon={Scissors} label="Trim" shortcut="T" size="small" disabled={mode !== "sketch"} testId="tool-trim" active={sketchSession?.activeTool === "trim"} onClick={() => setSketchTool("trim")} />
+                  <RibbonButton icon={ArrowUpRight} label="Extend" shortcut="E" size="small" disabled={mode !== "sketch"} testId="tool-extend" active={sketchSession?.activeTool === "extend"} onClick={() => setSketchTool("extend")} />
+                  <RibbonButton icon={Copy} label="Offset" shortcut="O" size="small" disabled={mode !== "sketch"} testId="tool-offset" active={sketchSession?.activeTool === "offset"} onClick={() => setSketchTool("offset")} />
                 </div>
                 <div className="flex flex-col gap-0.5">
                   <RibbonButton icon={FlipHorizontal} label="Mirror" size="small" disabled={mode !== "sketch"} testId="tool-mirror" active={sketchSession?.activeTool === "mirror"} onClick={() => setSketchTool("mirror")} />
-                  <RibbonButton icon={Circle} label="Fillet" size="small" disabled={mode !== "sketch"} testId="tool-sketch-fillet" active={sketchSession?.activeTool === "sketch-fillet"} onClick={() => setSketchTool("sketch-fillet")} />
-                  <RibbonButton icon={Octagon} label="Chamfer" size="small" disabled={mode !== "sketch"} testId="tool-sketch-chamfer" active={sketchSession?.activeTool === "sketch-chamfer"} onClick={() => setSketchTool("sketch-chamfer")} />
+                  <RibbonButton icon={Circle} label="Fillet" shortcut="F" size="small" disabled={mode !== "sketch"} testId="tool-sketch-fillet" active={sketchSession?.activeTool === "sketch-fillet"} onClick={() => setSketchTool("sketch-fillet")} />
+                  <RibbonButton icon={Octagon} label="Chamfer" shortcut="H" size="small" disabled={mode !== "sketch"} testId="tool-sketch-chamfer" active={sketchSession?.activeTool === "sketch-chamfer"} onClick={() => setSketchTool("sketch-chamfer")} />
                 </div>
               </RibbonGroup>
               <RibbonGroup label="Block">
@@ -354,14 +380,22 @@ export function CommandManager() {
                   <RibbonButton icon={Download} label="STL" size="small" testId="export-stl" disabled={!hasMesh} onClick={() => exportSTL(true)} />
                   <RibbonButton icon={Download} label="OBJ" size="small" testId="export-obj" disabled={!hasMesh} onClick={exportOBJ} />
                   <RibbonButton icon={Download} label="3MF" size="small" testId="export-3mf" disabled={!hasMesh} onClick={export3MF} />
-                  <RibbonButton icon={Download} label="GLB" size="small" testId="export-glb" disabled={!hasMesh} onClick={exportGLB} />
                 </div>
+                <div className="flex flex-col gap-0.5">
+                  <RibbonButton icon={Download} label="GLB" size="small" testId="export-glb" disabled={!hasMesh} onClick={exportGLB} />
+                  <RibbonButton icon={Download} label="STEP" size="small" testId="export-step" disabled={!hasMesh} onClick={() => setShowStepDialog(true)} />
+                </div>
+              </RibbonGroup>
+              <RibbonGroup label="Analysis">
+                <RibbonButton icon={Scale} label="Mass Props" size="small" testId="mass-properties" disabled={!hasMesh} onClick={() => setShowMassProperties(true)} />
               </RibbonGroup>
               <InteractionStyleToggle />
             </>
           )}
         </div>
       </div>
+      {showStepDialog && <StepExportDialog onClose={() => setShowStepDialog(false)} />}
+      {showMassProperties && <MassPropertiesPanel onClose={() => setShowMassProperties(false)} />}
     </>
   );
 }

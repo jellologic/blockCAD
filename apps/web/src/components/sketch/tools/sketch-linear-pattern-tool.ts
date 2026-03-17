@@ -2,7 +2,15 @@ import type { SketchPoint2D } from "@blockCAD/kernel";
 import { useEditorStore } from "@/stores/editor-store";
 import { getLineEndpoints } from "./geometry-utils";
 
-const DEFAULT_COUNT = 3;
+let patternCount = 3;
+
+export function setLinearPatternCount(n: number): void {
+  patternCount = Math.max(2, Math.round(n));
+}
+
+export function getLinearPatternCount(): number {
+  return patternCount;
+}
 
 /**
  * Sketch linear pattern: click a line entity, then click to set
@@ -59,7 +67,7 @@ export function handleSketchLinearPatternClick(pos: SketchPoint2D): void {
   store.beginUndoBatch();
 
   // Create copies
-  for (let i = 1; i < DEFAULT_COUNT; i++) {
+  for (let i = 1; i < patternCount; i++) {
     const ox = dirX * spacing * i;
     const oy = dirY * spacing * i;
 
