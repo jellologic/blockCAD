@@ -50,14 +50,20 @@ impl Plane {
 }
 
 impl Surface for Plane {
+    fn clone_box(&self) -> Box<dyn Surface> {
+        Box::new(self.clone())
+    }
+
     fn domain(&self) -> (f64, f64, f64, f64) {
         (f64::NEG_INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::INFINITY)
     }
 
+    #[inline]
     fn point_at(&self, u: f64, v: f64) -> KernelResult<Pt3> {
         Ok(self.origin + u * self.u_axis + v * self.v_axis)
     }
 
+    #[inline]
     fn normal_at(&self, _u: f64, _v: f64) -> KernelResult<Vec3> {
         Ok(self.normal)
     }
@@ -66,6 +72,7 @@ impl Surface for Plane {
         Ok((self.u_axis, self.v_axis))
     }
 
+    #[inline]
     fn closest_parameters(&self, point: &Pt3, _tolerance: f64) -> KernelResult<(f64, f64)> {
         let v = point - self.origin;
         Ok((v.dot(&self.u_axis), v.dot(&self.v_axis)))
@@ -85,10 +92,6 @@ impl Surface for Plane {
 
     fn is_closed_v(&self) -> bool {
         false
-    }
-
-    fn clone_box(&self) -> Box<dyn Surface> {
-        Box::new(self.clone())
     }
 }
 

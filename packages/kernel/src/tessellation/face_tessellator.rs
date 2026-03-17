@@ -2,9 +2,6 @@ use crate::error::{KernelError, KernelResult};
 use crate::topology::BRep;
 use crate::topology::face::FaceId;
 
-#[cfg(feature = "parallel")]
-use rayon::prelude::*;
-
 use super::ear_clip;
 use super::mesh::TriMesh;
 use super::params::TessellationParams;
@@ -93,13 +90,18 @@ pub fn tessellate_face(
         ear_clip::triangulate_with_holes(&vertices_2d, &inner_loops_2d)
     };
 
-    // Build combined vertex arrays (outer + inner loops)
-    let mut all_verts_3d = vertices_3d.clone();
+    // Build combined vertex arrays (outer + inner loops) with pre-computed capacity
+    let inner_total: usize = inner_loops_3d.iter().map(|v| v.len()).sum();
+    let total_verts = vertices_3d.len() + inner_total;
+
+    let mut all_verts_3d = Vec::with_capacity(total_verts);
+    all_verts_3d.extend_from_slice(&vertices_3d);
     for inner in &inner_loops_3d {
         all_verts_3d.extend_from_slice(inner);
     }
 
-    let mut all_verts_2d = vertices_2d.clone();
+    let mut all_verts_2d = Vec::with_capacity(total_verts);
+    all_verts_2d.extend_from_slice(&vertices_2d);
     for inner in &inner_loops_2d {
         all_verts_2d.extend_from_slice(inner);
     }
@@ -159,9 +161,8 @@ pub fn tessellate_face(
     Ok(mesh)
 }
 
-/// Tessellate an entire BRep into a single triangle mesh (sequential).
-#[cfg_attr(feature = "parallel", allow(dead_code))]
-fn tessellate_brep_sequential(
+/// Tessellate an entire BRep into a single triangle mesh.
+pub fn tessellate_brep(
     brep: &BRep,
     params: &TessellationParams,
 ) -> KernelResult<TriMesh> {
@@ -174,50 +175,8 @@ fn tessellate_brep_sequential(
         face_index += 1;
     }
 
-    Ok(combined)
-}
-
-/// Tessellate an entire BRep into a single triangle mesh (parallel via rayon).
-#[cfg(feature = "parallel")]
-fn tessellate_brep_parallel(
-    brep: &BRep,
-    params: &TessellationParams,
-) -> KernelResult<TriMesh> {
-    let faces: Vec<_> = brep.faces.iter().collect();
-    let face_meshes: Vec<KernelResult<TriMesh>> = faces
-        .par_iter()
-        .enumerate()
-        .map(|(idx, &(face_id, _face))| {
-            tessellate_face(brep, face_id, idx as u32, params)
-        })
-        .collect();
-
-    let mut combined = TriMesh::new();
-    for result in face_meshes {
-        combined.merge(&result?);
-    }
-    Ok(combined)
-}
-
-/// Tessellate an entire BRep into a single triangle mesh.
-///
-/// When the `parallel` feature is enabled (default on native targets),
-/// faces are tessellated in parallel using rayon. On WASM or when the
-/// feature is disabled, falls back to sequential tessellation.
-pub fn tessellate_brep(
-    brep: &BRep,
-    params: &TessellationParams,
-) -> KernelResult<TriMesh> {
-    #[cfg(feature = "parallel")]
-    let mut combined = tessellate_brep_parallel(brep, params)?;
-    #[cfg(not(feature = "parallel"))]
-    let mut combined = tessellate_brep_sequential(brep, params)?;
-
-    if !params.skip_validation {
-        combined.fix_winding();
-        combined.compute_feature_edges(15.0);
-        combined.validate()?;
-    }
+    combined.fix_winding();
+    combined.validate()?;
     Ok(combined)
 }
 
@@ -250,27 +209,6 @@ mod tests {
     }
 
     #[test]
-    fn tessellate_box_viewport_skips_validation() {
-        let brep = build_box_brep(2.0, 3.0, 4.0).unwrap();
-        let params = TessellationParams::viewport();
-        assert!(params.skip_validation);
-        let mesh = tessellate_brep(&brep, &params).unwrap();
-
-        // Geometry should still be sensible even without post-processing
-        assert_eq!(mesh.triangle_count(), 12, "Box should have 12 triangles");
-        assert_eq!(mesh.vertex_count(), 24);
-        // Positions and normals arrays must be populated and aligned
-        assert_eq!(mesh.positions.len(), mesh.normals.len());
-        assert_eq!(mesh.positions.len() % 3, 0);
-        assert_eq!(mesh.indices.len() % 3, 0);
-        // All indices in bounds
-        let vc = mesh.vertex_count() as u32;
-        for &idx in &mesh.indices {
-            assert!(idx < vc, "Index {} out of bounds (vc={})", idx, vc);
-        }
-    }
-
-    #[test]
     fn tessellated_box_to_bytes() {
         let brep = build_box_brep(1.0, 1.0, 1.0).unwrap();
         let params = TessellationParams::default();
@@ -281,57 +219,5 @@ mod tests {
         // First 4 bytes = vertex count
         let vc = u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
         assert_eq!(vc, 24);
-    }
-
-    /// Parallel tessellation produces the same vertex/triangle counts as sequential.
-    #[test]
-    fn parallel_matches_sequential() {
-        let brep = build_box_brep(5.0, 3.0, 2.0).unwrap();
-        let params = TessellationParams::default();
-
-        let seq = tessellate_brep_sequential(&brep, &params).unwrap();
-
-        #[cfg(feature = "parallel")]
-        {
-            let par = tessellate_brep_parallel(&brep, &params).unwrap();
-            assert_eq!(
-                seq.vertex_count(),
-                par.vertex_count(),
-                "Vertex counts must match between sequential and parallel"
-            );
-            assert_eq!(
-                seq.triangle_count(),
-                par.triangle_count(),
-                "Triangle counts must match between sequential and parallel"
-            );
-            assert_eq!(
-                seq.face_ids.len(),
-                par.face_ids.len(),
-                "Face ID counts must match between sequential and parallel"
-            );
-            // Both must produce valid meshes after fix_winding
-            let mut par_fixed = par;
-            par_fixed.fix_winding();
-            assert!(par_fixed.validate().is_ok());
-        }
-
-        // Sequential should also be valid
-        let mut seq_fixed = seq;
-        seq_fixed.fix_winding();
-        assert!(seq_fixed.validate().is_ok());
-    }
-
-    /// Parallel tessellation works on multiple box sizes.
-    #[cfg(feature = "parallel")]
-    #[test]
-    fn parallel_various_boxes() {
-        let params = TessellationParams::default();
-        for &(w, h, d) in &[(1.0, 1.0, 1.0), (10.0, 0.5, 3.0), (0.1, 0.1, 0.1)] {
-            let brep = build_box_brep(w, h, d).unwrap();
-            let mesh = tessellate_brep(&brep, &params).unwrap();
-            assert_eq!(mesh.triangle_count(), 12);
-            assert_eq!(mesh.vertex_count(), 24);
-            assert!(mesh.validate().is_ok());
-        }
     }
 }

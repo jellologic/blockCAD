@@ -94,6 +94,7 @@ name = "blockcad-kernel"
 version = "0.1.0"
 dependencies = [
  "approx",
+ "bytemuck",
  "console_error_panic_hook",
  "criterion",
  "faer",

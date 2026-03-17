@@ -128,39 +128,25 @@ fn compute_from_surface_offset(
 
 /// Evaluate the feature tree, producing the final BRep.
 ///
-/// Uses cached BRep snapshots to skip unchanged features. Only features
-/// from the first dirty (uncached) index onward are re-evaluated.
+/// Replays operations from scratch up to the cursor.
 /// Features marked as Suppressed are skipped.
+///
+/// Currently rebuilds from scratch each time (no incremental caching).
+/// Caching will be added once BRep supports Clone or we implement
+/// a copy-on-write scheme.
 pub fn evaluate(tree: &mut FeatureTree) -> KernelResult<BRep> {
     let cursor = match tree.cursor() {
         Some(c) => c,
         None => return Ok(BRep::new()),
     };
 
-    // Find the latest valid cache entry before any dirty feature.
-    // A feature is "dirty" if its cache slot is None.
-    let start_from = (0..=cursor)
-        .find(|&i| tree.cache_at(i).is_none())
-        .unwrap_or(cursor + 1); // all cached
+    let mut current_brep = BRep::new();
 
-    // If everything up to cursor is cached, return the cached result directly.
-    if start_from > cursor {
-        return Ok(tree.cache_at(cursor).unwrap().clone());
-    }
-
-    // Load BRep state from the cache entry just before the first dirty feature.
-    let mut current_brep = if start_from > 0 {
-        tree.cache_at(start_from - 1).unwrap().clone()
-    } else {
-        BRep::new()
-    };
-
-    for i in start_from..=cursor {
+    for i in 0..=cursor {
         let feature = &tree.features()[i];
 
         if feature.suppressed {
             tree.features_mut()[i].state = FeatureState::Evaluated;
-            tree.set_cache(i, current_brep.clone());
             continue;
         }
 
@@ -198,8 +184,8 @@ pub fn evaluate(tree: &mut FeatureTree) -> KernelResult<BRep> {
             }
 
             FeatureKind::Extrude => {
-                let mut params = match &tree.features()[i].params {
-                    FeatureParams::Extrude(p) => p.clone(),
+                let params_ref = match &tree.features()[i].params {
+                    FeatureParams::Extrude(p) => p,
                     _ => {
                         tree.features_mut()[i].state = FeatureState::Failed;
                         return Err(KernelError::Operation {
@@ -208,6 +194,8 @@ pub fn evaluate(tree: &mut FeatureTree) -> KernelResult<BRep> {
                         });
                     }
                 };
+                // Only clone when we need to mutate (for computed depth/offset fields)
+                let mut params = params_ref.clone();
 
                 let profile = find_latest_sketch_profile(tree, i)?;
 
@@ -262,8 +250,8 @@ pub fn evaluate(tree: &mut FeatureTree) -> KernelResult<BRep> {
             }
 
             FeatureKind::CutExtrude => {
-                let mut params = match &tree.features()[i].params {
-                    FeatureParams::CutExtrude(p) => p.clone(),
+                let params_ref = match &tree.features()[i].params {
+                    FeatureParams::CutExtrude(p) => p,
                     _ => {
                         tree.features_mut()[i].state = FeatureState::Failed;
                         return Err(KernelError::Operation {
@@ -272,6 +260,8 @@ pub fn evaluate(tree: &mut FeatureTree) -> KernelResult<BRep> {
                         });
                     }
                 };
+                // Only clone when we need to mutate (for computed depth/offset fields)
+                let mut params = params_ref.clone();
 
                 if matches!(current_brep.body, Body::Empty) {
                     tree.features_mut()[i].state = FeatureState::Failed;
@@ -335,7 +325,7 @@ pub fn evaluate(tree: &mut FeatureTree) -> KernelResult<BRep> {
 
             FeatureKind::Revolve => {
                 let params = match &tree.features()[i].params {
-                    FeatureParams::Revolve(p) => p.clone(),
+                    FeatureParams::Revolve(p) => p,
                     _ => {
                         tree.features_mut()[i].state = FeatureState::Failed;
                         return Err(KernelError::Operation {
@@ -346,13 +336,13 @@ pub fn evaluate(tree: &mut FeatureTree) -> KernelResult<BRep> {
                 };
 
                 let profile = find_latest_sketch_profile(tree, i)?;
-                current_brep = revolve_profile(&profile, &params)?;
+                current_brep = revolve_profile(&profile, params)?;
                 tree.features_mut()[i].state = FeatureState::Evaluated;
             }
 
             FeatureKind::CutRevolve => {
                 let params = match &tree.features()[i].params {
-                    FeatureParams::CutRevolve(p) => p.clone(),
+                    FeatureParams::CutRevolve(p) => p,
                     _ => {
                         tree.features_mut()[i].state = FeatureState::Failed;
                         return Err(KernelError::Operation {
@@ -374,13 +364,13 @@ pub fn evaluate(tree: &mut FeatureTree) -> KernelResult<BRep> {
                 // NOTE: CutRevolve currently creates additive geometry (same as boss revolve).
                 // Proper boolean subtract for curved geometry requires a CSG engine which is
                 // not yet implemented. The UI warns the user about this limitation.
-                current_brep = revolve_profile(&profile, &params)?;
+                current_brep = revolve_profile(&profile, params)?;
                 tree.features_mut()[i].state = FeatureState::Evaluated;
             }
 
             FeatureKind::Chamfer => {
                 let params = match &tree.features()[i].params {
-                    FeatureParams::Chamfer(p) => p.clone(),
+                    FeatureParams::Chamfer(p) => p,
                     _ => {
                         tree.features_mut()[i].state = FeatureState::Failed;
                         return Err(KernelError::Operation {
@@ -396,13 +386,13 @@ pub fn evaluate(tree: &mut FeatureTree) -> KernelResult<BRep> {
                         detail: "Cannot chamfer: no existing geometry".into(),
                     });
                 }
-                current_brep = crate::operations::chamfer::chamfer_edges(&current_brep, &params)?;
+                current_brep = crate::operations::chamfer::chamfer_edges(&current_brep, params)?;
                 tree.features_mut()[i].state = FeatureState::Evaluated;
             }
 
             FeatureKind::Fillet => {
                 let params = match &tree.features()[i].params {
-                    FeatureParams::Fillet(p) => p.clone(),
+                    FeatureParams::Fillet(p) => p,
                     _ => {
                         tree.features_mut()[i].state = FeatureState::Failed;
                         return Err(KernelError::Operation {
@@ -418,13 +408,13 @@ pub fn evaluate(tree: &mut FeatureTree) -> KernelResult<BRep> {
                         detail: "Cannot fillet: no existing geometry".into(),
                     });
                 }
-                current_brep = crate::operations::fillet::fillet_edges(&current_brep, &params)?;
+                current_brep = crate::operations::fillet::fillet_edges(&current_brep, params)?;
                 tree.features_mut()[i].state = FeatureState::Evaluated;
             }
 
             FeatureKind::LinearPattern => {
                 let params = match &tree.features()[i].params {
-                    FeatureParams::LinearPattern(p) => p.clone(),
+                    FeatureParams::LinearPattern(p) => p,
                     _ => {
                         tree.features_mut()[i].state = FeatureState::Failed;
                         return Err(KernelError::Operation {
@@ -440,13 +430,13 @@ pub fn evaluate(tree: &mut FeatureTree) -> KernelResult<BRep> {
                         detail: "Cannot pattern: no existing geometry".into(),
                     });
                 }
-                current_brep = crate::operations::pattern::linear::linear_pattern(&current_brep, &params)?;
+                current_brep = crate::operations::pattern::linear::linear_pattern(&current_brep, params)?;
                 tree.features_mut()[i].state = FeatureState::Evaluated;
             }
 
             FeatureKind::CircularPattern => {
                 let params = match &tree.features()[i].params {
-                    FeatureParams::CircularPattern(p) => p.clone(),
+                    FeatureParams::CircularPattern(p) => p,
                     _ => {
                         tree.features_mut()[i].state = FeatureState::Failed;
                         return Err(KernelError::Operation {
@@ -462,13 +452,13 @@ pub fn evaluate(tree: &mut FeatureTree) -> KernelResult<BRep> {
                         detail: "Cannot pattern: no existing geometry".into(),
                     });
                 }
-                current_brep = crate::operations::pattern::circular::circular_pattern(&current_brep, &params)?;
+                current_brep = crate::operations::pattern::circular::circular_pattern(&current_brep, params)?;
                 tree.features_mut()[i].state = FeatureState::Evaluated;
             }
 
             FeatureKind::Mirror => {
                 let params = match &tree.features()[i].params {
-                    FeatureParams::Mirror(p) => p.clone(),
+                    FeatureParams::Mirror(p) => p,
                     _ => {
                         tree.features_mut()[i].state = FeatureState::Failed;
                         return Err(KernelError::Operation {
@@ -484,13 +474,13 @@ pub fn evaluate(tree: &mut FeatureTree) -> KernelResult<BRep> {
                         detail: "Cannot mirror: no existing geometry".into(),
                     });
                 }
-                current_brep = crate::operations::pattern::mirror::mirror_brep(&current_brep, &params)?;
+                current_brep = crate::operations::pattern::mirror::mirror_brep(&current_brep, params)?;
                 tree.features_mut()[i].state = FeatureState::Evaluated;
             }
 
             FeatureKind::Shell => {
                 let params = match &tree.features()[i].params {
-                    FeatureParams::Shell(p) => p.clone(),
+                    FeatureParams::Shell(p) => p,
                     _ => {
                         tree.features_mut()[i].state = FeatureState::Failed;
                         return Err(KernelError::Operation {
@@ -506,13 +496,13 @@ pub fn evaluate(tree: &mut FeatureTree) -> KernelResult<BRep> {
                         detail: "Cannot shell: no existing geometry".into(),
                     });
                 }
-                current_brep = crate::operations::shell::shell_solid(&current_brep, &params)?;
+                current_brep = crate::operations::shell::shell_solid(&current_brep, params)?;
                 tree.features_mut()[i].state = FeatureState::Evaluated;
             }
 
             FeatureKind::Draft => {
                 let params = match &tree.features()[i].params {
-                    FeatureParams::Draft(p) => p.clone(),
+                    FeatureParams::Draft(p) => p,
                     _ => {
                         tree.features_mut()[i].state = FeatureState::Failed;
                         return Err(KernelError::Operation {
@@ -528,13 +518,13 @@ pub fn evaluate(tree: &mut FeatureTree) -> KernelResult<BRep> {
                         detail: "Cannot draft: no existing geometry".into(),
                     });
                 }
-                current_brep = crate::operations::draft::draft_faces(&current_brep, &params)?;
+                current_brep = crate::operations::draft::draft_faces(&current_brep, params)?;
                 tree.features_mut()[i].state = FeatureState::Evaluated;
             }
 
             FeatureKind::DatumPlane => {
                 let params = match &tree.features()[i].params {
-                    FeatureParams::DatumPlane(p) => p.clone(),
+                    FeatureParams::DatumPlane(p) => p,
                     _ => {
                         tree.features_mut()[i].state = FeatureState::Failed;
                         return Err(KernelError::Operation {
@@ -560,7 +550,7 @@ pub fn evaluate(tree: &mut FeatureTree) -> KernelResult<BRep> {
 
             FeatureKind::VariableFillet => {
                 let params = match &tree.features()[i].params {
-                    FeatureParams::VariableFillet(p) => p.clone(),
+                    FeatureParams::VariableFillet(p) => p,
                     _ => {
                         tree.features_mut()[i].state = FeatureState::Failed;
                         return Err(KernelError::Operation {
@@ -576,13 +566,13 @@ pub fn evaluate(tree: &mut FeatureTree) -> KernelResult<BRep> {
                         detail: "Cannot variable fillet: no existing geometry".into(),
                     });
                 }
-                current_brep = crate::operations::fillet::variable_fillet_edges(&current_brep, &params)?;
+                current_brep = crate::operations::fillet::variable_fillet_edges(&current_brep, params)?;
                 tree.features_mut()[i].state = FeatureState::Evaluated;
             }
 
             FeatureKind::FaceFillet => {
                 let params = match &tree.features()[i].params {
-                    FeatureParams::FaceFillet(p) => p.clone(),
+                    FeatureParams::FaceFillet(p) => p,
                     _ => {
                         tree.features_mut()[i].state = FeatureState::Failed;
                         return Err(KernelError::Operation {
@@ -598,13 +588,13 @@ pub fn evaluate(tree: &mut FeatureTree) -> KernelResult<BRep> {
                         detail: "Cannot face fillet: no existing geometry".into(),
                     });
                 }
-                current_brep = crate::operations::fillet::face_fillet(&current_brep, &params)?;
+                current_brep = crate::operations::fillet::face_fillet(&current_brep, params)?;
                 tree.features_mut()[i].state = FeatureState::Evaluated;
             }
 
             FeatureKind::MoveBody => {
                 let params = match &tree.features()[i].params {
-                    FeatureParams::MoveBody(p) => p.clone(),
+                    FeatureParams::MoveBody(p) => p,
                     _ => {
                         tree.features_mut()[i].state = FeatureState::Failed;
                         return Err(KernelError::Operation {
@@ -620,13 +610,13 @@ pub fn evaluate(tree: &mut FeatureTree) -> KernelResult<BRep> {
                         detail: "Cannot move/copy: no existing geometry".into(),
                     });
                 }
-                current_brep = crate::operations::transform_body::move_body(&current_brep, &params)?;
+                current_brep = crate::operations::transform_body::move_body(&current_brep, params)?;
                 tree.features_mut()[i].state = FeatureState::Evaluated;
             }
 
             FeatureKind::ScaleBody => {
                 let params = match &tree.features()[i].params {
-                    FeatureParams::ScaleBody(p) => p.clone(),
+                    FeatureParams::ScaleBody(p) => p,
                     _ => {
                         tree.features_mut()[i].state = FeatureState::Failed;
                         return Err(KernelError::Operation {
@@ -642,13 +632,13 @@ pub fn evaluate(tree: &mut FeatureTree) -> KernelResult<BRep> {
                         detail: "Cannot scale: no existing geometry".into(),
                     });
                 }
-                current_brep = crate::operations::transform::scale_body(&current_brep, &params)?;
+                current_brep = crate::operations::transform::scale_body(&current_brep, params)?;
                 tree.features_mut()[i].state = FeatureState::Evaluated;
             }
 
             FeatureKind::HoleWizard => {
                 let params = match &tree.features()[i].params {
-                    FeatureParams::HoleWizard(p) => p.clone(),
+                    FeatureParams::HoleWizard(p) => p,
                     _ => {
                         tree.features_mut()[i].state = FeatureState::Failed;
                         return Err(KernelError::Operation {
@@ -664,13 +654,13 @@ pub fn evaluate(tree: &mut FeatureTree) -> KernelResult<BRep> {
                         detail: "Cannot create hole: no existing geometry".into(),
                     });
                 }
-                current_brep = crate::operations::hole::hole_wizard(current_brep, &params)?;
+                current_brep = crate::operations::hole::hole_wizard(current_brep, params)?;
                 tree.features_mut()[i].state = FeatureState::Evaluated;
             }
 
             FeatureKind::Dome => {
                 let params = match &tree.features()[i].params {
-                    FeatureParams::Dome(p) => p.clone(),
+                    FeatureParams::Dome(p) => p,
                     _ => {
                         tree.features_mut()[i].state = FeatureState::Failed;
                         return Err(KernelError::Operation {
@@ -686,13 +676,13 @@ pub fn evaluate(tree: &mut FeatureTree) -> KernelResult<BRep> {
                         detail: "Cannot dome: no existing geometry".into(),
                     });
                 }
-                current_brep = crate::operations::dome::dome_face(&current_brep, &params)?;
+                current_brep = crate::operations::dome::dome_face(&current_brep, params)?;
                 tree.features_mut()[i].state = FeatureState::Evaluated;
             }
 
             FeatureKind::Rib => {
                 let params = match &tree.features()[i].params {
-                    FeatureParams::Rib(p) => p.clone(),
+                    FeatureParams::Rib(p) => p,
                     _ => {
                         tree.features_mut()[i].state = FeatureState::Failed;
                         return Err(KernelError::Operation {
@@ -709,13 +699,13 @@ pub fn evaluate(tree: &mut FeatureTree) -> KernelResult<BRep> {
                     });
                 }
                 let profile = find_latest_sketch_profile(tree, i)?;
-                current_brep = crate::operations::rib::rib_from_profile(&current_brep, &profile, &params)?;
+                current_brep = crate::operations::rib::rib_from_profile(&current_brep, &profile, params)?;
                 tree.features_mut()[i].state = FeatureState::Evaluated;
             }
 
             FeatureKind::SplitBody => {
                 let params = match &tree.features()[i].params {
-                    FeatureParams::SplitBody(p) => p.clone(),
+                    FeatureParams::SplitBody(p) => p,
                     _ => {
                         tree.features_mut()[i].state = FeatureState::Failed;
                         return Err(KernelError::Operation {
@@ -731,11 +721,12 @@ pub fn evaluate(tree: &mut FeatureTree) -> KernelResult<BRep> {
                         detail: "Cannot split: no existing geometry".into(),
                     });
                 }
-                current_brep = crate::operations::boolean::split::split_body(&current_brep, &params)?;
+                current_brep = crate::operations::boolean::split::split_body(&current_brep, params)?;
                 tree.features_mut()[i].state = FeatureState::Evaluated;
             }
 
             FeatureKind::CombineBodies => {
+                // Clone needed here: params borrows tree.features, but we need tree.tool_bodies.remove()
                 let params = match &tree.features()[i].params {
                     FeatureParams::CombineBodies(p) => p.clone(),
                     _ => {
@@ -763,7 +754,7 @@ pub fn evaluate(tree: &mut FeatureTree) -> KernelResult<BRep> {
 
             FeatureKind::CurvePattern => {
                 let params = match &tree.features()[i].params {
-                    FeatureParams::CurvePattern(p) => p.clone(),
+                    FeatureParams::CurvePattern(p) => p,
                     _ => {
                         tree.features_mut()[i].state = FeatureState::Failed;
                         return Err(KernelError::Operation {
@@ -779,7 +770,7 @@ pub fn evaluate(tree: &mut FeatureTree) -> KernelResult<BRep> {
                         detail: "Cannot pattern: no existing geometry".into(),
                     });
                 }
-                current_brep = crate::operations::pattern::curve::curve_pattern(&current_brep, &params)?;
+                current_brep = crate::operations::pattern::curve::curve_pattern(&current_brep, params)?;
                 tree.features_mut()[i].state = FeatureState::Evaluated;
             }
 
@@ -796,9 +787,6 @@ pub fn evaluate(tree: &mut FeatureTree) -> KernelResult<BRep> {
                 });
             }
         }
-
-        // Cache the BRep state after this feature for incremental re-evaluation.
-        tree.set_cache(i, current_brep.clone());
     }
 
     Ok(current_brep)
@@ -957,164 +945,6 @@ mod tests {
         tree.unsuppress(1).unwrap();
         let brep = evaluate(&mut tree).unwrap();
         assert_eq!(brep.faces.len(), 6);
-    }
-
-    /// Build a tree with sketch(0) + extrude(1) + chamfer(2).
-    fn build_three_feature_tree() -> FeatureTree {
-        let mut tree = build_sketch_extrude_tree(7.0);
-        tree.push(Feature::new(
-            "chamfer-1".into(),
-            "Chamfer Edges".into(),
-            FeatureKind::Chamfer,
-            FeatureParams::Chamfer(crate::operations::chamfer::ChamferParams {
-                edge_indices: vec![0],
-                distance: 0.5,
-                distance2: None,
-                mode: None,
-            }),
-        ));
-        tree
-    }
-
-    #[test]
-    fn test_cache_populated_after_evaluate() {
-        let mut tree = build_sketch_extrude_tree(7.0);
-        evaluate(&mut tree).unwrap();
-
-        // Both features should now have cached BRep state
-        assert!(tree.cache_at(0).is_some(), "Sketch cache should be populated");
-        assert!(tree.cache_at(1).is_some(), "Extrude cache should be populated");
-    }
-
-    #[test]
-    fn test_cache_hit_skips_upstream_features() {
-        let mut tree = build_three_feature_tree();
-
-        // First evaluation populates all caches
-        let brep1 = evaluate(&mut tree).unwrap();
-        let face_count_1 = brep1.faces.len();
-
-        // Invalidate only the last feature (chamfer)
-        tree.invalidate_from(2);
-        assert!(tree.cache_at(0).is_some(), "Sketch cache should survive");
-        assert!(tree.cache_at(1).is_some(), "Extrude cache should survive");
-        assert!(tree.cache_at(2).is_none(), "Chamfer cache should be cleared");
-
-        // Re-evaluate: should reuse cache for features 0-1, only re-run feature 2
-        let brep2 = evaluate(&mut tree).unwrap();
-        assert_eq!(brep2.faces.len(), face_count_1, "Result should be identical");
-        assert!(tree.cache_at(2).is_some(), "Chamfer cache should be repopulated");
-    }
-
-    #[test]
-    fn test_cache_miss_when_early_feature_modified() {
-        let mut tree = build_three_feature_tree();
-
-        // First evaluation
-        evaluate(&mut tree).unwrap();
-
-        // Invalidate from the extrude (feature 1) -- simulates param change
-        tree.invalidate_from(1);
-        assert!(tree.cache_at(0).is_some(), "Sketch cache should survive");
-        assert!(tree.cache_at(1).is_none(), "Extrude cache should be cleared");
-        assert!(tree.cache_at(2).is_none(), "Chamfer cache should be cleared");
-
-        // Re-evaluate: features 1 and 2 must be re-evaluated
-        let brep = evaluate(&mut tree).unwrap();
-        assert!(tree.cache_at(1).is_some(), "Extrude cache should be repopulated");
-        assert!(tree.cache_at(2).is_some(), "Chamfer cache should be repopulated");
-        assert!(brep.faces.len() > 0);
-    }
-
-    #[test]
-    fn test_suppress_invalidates_downstream_cache() {
-        let mut tree = build_three_feature_tree();
-
-        // First evaluation
-        evaluate(&mut tree).unwrap();
-        assert!(tree.cache_at(2).is_some());
-
-        // Suppress the extrude (feature 1) -- invalidates features 1+
-        tree.suppress(1).unwrap();
-        assert!(tree.cache_at(1).is_none(), "Suppressed feature cache should be cleared");
-        assert!(tree.cache_at(2).is_none(), "Downstream cache should be cleared");
-
-        // Chamfer will fail because there's no geometry, which is expected.
-        // The extrude is suppressed so current_brep stays empty.
-        let result = evaluate(&mut tree);
-        assert!(result.is_err(), "Chamfer on empty body should fail");
-    }
-
-    #[test]
-    fn test_push_new_feature_does_not_clear_existing_cache() {
-        let mut tree = build_sketch_extrude_tree(7.0);
-        evaluate(&mut tree).unwrap();
-
-        assert!(tree.cache_at(0).is_some());
-        assert!(tree.cache_at(1).is_some());
-
-        // Push a new feature at the end
-        tree.push(Feature::new(
-            "chamfer-1".into(),
-            "Chamfer".into(),
-            FeatureKind::Chamfer,
-            FeatureParams::Chamfer(crate::operations::chamfer::ChamferParams {
-                edge_indices: vec![0],
-                distance: 0.5,
-                distance2: None,
-                mode: None,
-            }),
-        ));
-
-        // Existing caches should be preserved
-        assert!(tree.cache_at(0).is_some(), "Existing sketch cache should survive push");
-        assert!(tree.cache_at(1).is_some(), "Existing extrude cache should survive push");
-        assert!(tree.cache_at(2).is_none(), "New feature should start uncached");
-
-        // Re-evaluate: only the new feature should be computed
-        let brep = evaluate(&mut tree).unwrap();
-        assert!(tree.cache_at(2).is_some(), "New feature cache should be populated");
-        assert!(brep.faces.len() > 0);
-    }
-
-    #[test]
-    fn test_update_params_invalidates_cache() {
-        let mut tree = build_sketch_extrude_tree(7.0);
-        evaluate(&mut tree).unwrap();
-
-        assert!(tree.cache_at(0).is_some());
-        assert!(tree.cache_at(1).is_some());
-
-        // Update extrude params (changes depth)
-        tree.update_params(
-            1,
-            FeatureParams::Extrude(crate::operations::extrude::ExtrudeParams::blind(
-                Vec3::new(0.0, 0.0, 1.0),
-                12.0,
-            )),
-        ).unwrap();
-
-        assert!(tree.cache_at(0).is_some(), "Upstream cache should survive");
-        assert!(tree.cache_at(1).is_none(), "Modified feature cache should be cleared");
-
-        let brep = evaluate(&mut tree).unwrap();
-        assert_eq!(brep.faces.len(), 6);
-        assert!(tree.cache_at(1).is_some(), "Cache should be repopulated");
-    }
-
-    #[test]
-    fn test_fully_cached_returns_without_reeval() {
-        let mut tree = build_sketch_extrude_tree(7.0);
-
-        // First evaluation
-        let brep1 = evaluate(&mut tree).unwrap();
-
-        // Second evaluation should hit cache entirely
-        let brep2 = evaluate(&mut tree).unwrap();
-
-        assert_eq!(brep1.faces.len(), brep2.faces.len());
-        assert_eq!(brep1.vertices.len(), brep2.vertices.len());
-        assert_eq!(brep1.edges.len(), brep2.edges.len());
     }
 
     #[test]

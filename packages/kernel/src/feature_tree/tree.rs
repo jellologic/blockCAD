@@ -148,24 +148,15 @@ impl FeatureTree {
         }
     }
 
+    /// Take the cached BRep out of the slot (leaving None), avoiding a clone.
+    pub fn take_cache(&mut self, index: usize) -> Option<BRep> {
+        self.cache.get_mut(index).and_then(|c| c.take())
+    }
+
     pub fn invalidate_from(&mut self, index: usize) {
         for i in index..self.cache.len() {
             self.cache[i] = None;
         }
-    }
-
-    /// Update a feature's parameters and invalidate caches from that index onward.
-    pub fn update_params(
-        &mut self,
-        index: usize,
-        params: super::params::FeatureParams,
-    ) -> KernelResult<()> {
-        let feature = self.features.get_mut(index).ok_or_else(|| {
-            KernelError::NotFound(format!("Feature at index {}", index))
-        })?;
-        feature.params = params;
-        self.invalidate_from(index);
-        Ok(())
     }
 }
 
