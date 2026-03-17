@@ -19,6 +19,7 @@ import {
   RIGHT_PLANE,
 } from "@blockCAD/kernel";
 import { toast } from "sonner";
+import { SAMPLE_MODELS } from "@/lib/samples";
 
 type EditorMode = "view" | "sketch" | "select-face" | "select-edge" | "select-plane";
 
@@ -161,6 +162,13 @@ interface EditorState {
   cancelOperation: () => void;
   suppressFeature: (index: number) => void;
   unsuppressFeature: (index: number) => void;
+  deleteFeature: (index: number) => void;
+  renameFeature: (index: number, name: string) => void;
+  moveFeatureUp: (index: number) => void;
+  moveFeatureDown: (index: number) => void;
+  editFeature: (index: number) => void;
+  rollbackTo: (index: number) => void;
+  rollForward: () => void;
 
   // Camera actions
   setCameraTarget: (position: [number, number, number] | null) => void;
@@ -193,6 +201,9 @@ interface EditorState {
   endUndoBatch: () => void;
   deleteSelectedEntities: (entityIds: string[]) => void;
   setMeasureResult: (result: MeasureResult | null) => void;
+
+  // Sample models
+  loadSample: (sampleId: string) => void;
 
   // Export actions
   exportSTL: (binary?: boolean) => void;
@@ -709,6 +720,113 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     }
   },
 
+  deleteFeature: (index) => {
+    const { kernel } = get();
+    if (!kernel) return;
+    try {
+      kernel.removeFeature(index);
+      try {
+        const mesh = kernel.tessellate();
+        set({ meshData: mesh, features: kernel.featureList, selectedFeatureId: null });
+      } catch {
+        set({ features: kernel.featureList, selectedFeatureId: null });
+      }
+      toast.success("Feature deleted");
+    } catch (err) {
+      toast.error("Delete failed: " + (err instanceof Error ? err.message : String(err)));
+    }
+  },
+
+  renameFeature: (index, name) => {
+    const { kernel } = get();
+    if (!kernel) return;
+    try {
+      kernel.renameFeature(index, name);
+      set({ features: kernel.featureList });
+    } catch (err) {
+      toast.error("Rename failed: " + (err instanceof Error ? err.message : String(err)));
+    }
+  },
+
+  moveFeatureUp: (index) => {
+    const { kernel } = get();
+    if (!kernel || index <= 0) return;
+    try {
+      kernel.moveFeature(index, index - 1);
+      try {
+        const mesh = kernel.tessellate();
+        set({ meshData: mesh, features: kernel.featureList });
+      } catch {
+        set({ features: kernel.featureList });
+      }
+    } catch (err) {
+      toast.error("Move failed: " + (err instanceof Error ? err.message : String(err)));
+    }
+  },
+
+  moveFeatureDown: (index) => {
+    const { kernel, features } = get();
+    if (!kernel || index >= features.length - 1) return;
+    try {
+      kernel.moveFeature(index, index + 1);
+      try {
+        const mesh = kernel.tessellate();
+        set({ meshData: mesh, features: kernel.featureList });
+      } catch {
+        set({ features: kernel.featureList });
+      }
+    } catch (err) {
+      toast.error("Move failed: " + (err instanceof Error ? err.message : String(err)));
+    }
+  },
+
+  editFeature: (index) => {
+    const { features } = get();
+    const feature = features[index];
+    if (!feature) return;
+    // Load the feature's params into activeOperation for editing
+    const kind = feature.type;
+    if (kind === "sketch") {
+      // For sketch features, re-enter sketch mode is not supported here
+      toast.info("To edit a sketch, double-click it and re-enter sketch mode");
+      return;
+    }
+    const params = feature.params?.params ?? {};
+    set({ activeOperation: { type: kind, params: { ...params } } });
+  },
+
+  rollbackTo: (index) => {
+    const { kernel } = get();
+    if (!kernel) return;
+    try {
+      kernel.rollbackTo(index);
+      try {
+        const mesh = kernel.tessellate();
+        set({ meshData: mesh, features: kernel.featureList });
+      } catch {
+        set({ features: kernel.featureList });
+      }
+    } catch (err) {
+      toast.error("Rollback failed: " + (err instanceof Error ? err.message : String(err)));
+    }
+  },
+
+  rollForward: () => {
+    const { kernel } = get();
+    if (!kernel) return;
+    try {
+      kernel.rollForward();
+      try {
+        const mesh = kernel.tessellate();
+        set({ meshData: mesh, features: kernel.featureList });
+      } catch {
+        set({ features: kernel.featureList });
+      }
+    } catch (err) {
+      toast.error("Roll forward failed: " + (err instanceof Error ? err.message : String(err)));
+    }
+  },
+
   // --- Sketch actions ---
 
   enterSketchMode: (planeId) => {
@@ -1077,6 +1195,28 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     set({
       sketchSession: { ...sketchSession, measureResult: result },
     });
+  },
+
+  loadSample: (sampleId) => {
+    const sample = SAMPLE_MODELS.find((s) => s.id === sampleId);
+    if (!sample) return;
+    const fresh = new KernelClient();
+    try {
+      sample.build(fresh);
+      const mesh = fresh.tessellate();
+      set({
+        kernel: fresh,
+        meshData: mesh,
+        features: fresh.featureList,
+        activeOperation: null,
+        selectedFeatureId: null,
+        selectedFaceIndex: null,
+      });
+      toast.success(`Loaded: ${sample.name}`);
+    } catch (err) {
+      console.error("[blockCAD] Failed to load sample:", err);
+      toast.error("Failed to load sample: " + (err instanceof Error ? err.message : String(err)));
+    }
   },
 
   exportSTL: (binary = true) => {

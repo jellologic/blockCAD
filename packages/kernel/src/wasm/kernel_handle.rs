@@ -89,6 +89,36 @@ impl KernelHandle {
         self.core.unsuppress(index).map_err(|e| e.into())
     }
 
+    /// Remove a feature by index.
+    pub fn remove_feature(&mut self, index: usize) -> Result<(), JsValue> {
+        self.core.remove_feature(index).map_err(|e| e.into())
+    }
+
+    /// Rename a feature by index.
+    pub fn rename_feature(&mut self, index: usize, name: &str) -> Result<(), JsValue> {
+        self.core.rename_feature(index, name).map_err(|e| e.into())
+    }
+
+    /// Move a feature from one index to another.
+    pub fn move_feature(&mut self, from: usize, to: usize) -> Result<(), JsValue> {
+        self.core.move_feature(from, to).map_err(|e| e.into())
+    }
+
+    /// Update feature params by index.
+    pub fn update_feature_params(&mut self, index: usize, params_json: &str) -> Result<(), JsValue> {
+        self.core.update_feature_params(index, params_json).map_err(|e| e.into())
+    }
+
+    /// Roll back to just before the feature at `index`.
+    pub fn rollback_to(&mut self, index: usize) -> Result<(), JsValue> {
+        self.core.rollback_to(index).map_err(|e| e.into())
+    }
+
+    /// Roll forward to include all features.
+    pub fn roll_forward(&mut self) {
+        self.core.roll_forward()
+    }
+
     // --- Export operations ---
 
     /// Export as binary STL bytes.

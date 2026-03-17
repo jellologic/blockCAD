@@ -215,6 +215,43 @@ impl KernelCore {
         self.tree.unsuppress(index)
     }
 
+    /// Remove a feature by index.
+    pub fn remove_feature(&mut self, index: usize) -> KernelResult<()> {
+        self.tree.remove_feature(index)
+    }
+
+    /// Rename a feature by index.
+    pub fn rename_feature(&mut self, index: usize, name: &str) -> KernelResult<()> {
+        self.tree.rename_feature(index, name.to_string())
+    }
+
+    /// Move a feature from one index to another.
+    pub fn move_feature(&mut self, from: usize, to: usize) -> KernelResult<()> {
+        self.tree.move_feature(from, to)
+    }
+
+    /// Update feature params by index from JSON.
+    pub fn update_feature_params(&mut self, index: usize, params_json: &str) -> KernelResult<()> {
+        let params: FeatureParams =
+            serde_json::from_str(params_json).map_err(|e| KernelError::Serialization(e.to_string()))?;
+        let feature = self.tree.features_mut().get_mut(index).ok_or_else(|| {
+            KernelError::NotFound(format!("Feature at index {}", index))
+        })?;
+        feature.params = params;
+        self.tree.invalidate_from(index);
+        Ok(())
+    }
+
+    /// Roll back to just before the feature at `index`.
+    pub fn rollback_to(&mut self, index: usize) -> KernelResult<()> {
+        self.tree.rollback_to(index)
+    }
+
+    /// Roll forward to include all features.
+    pub fn roll_forward(&mut self) {
+        self.tree.roll_forward()
+    }
+
     /// Deserialize from .blockcad JSON format.
     pub fn deserialize(json: &str) -> KernelResult<Self> {
         let doc = KernelDocument::from_json(json)

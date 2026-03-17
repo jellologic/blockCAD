@@ -22,6 +22,9 @@ export function useKeyboardShortcuts() {
   const setSketchTool = useEditorStore((s) => s.setSketchTool);
   const clearPendingPoints = useEditorStore((s) => s.clearPendingPoints);
   const sketchSession = useEditorStore((s) => s.sketchSession);
+  const deleteFeature = useEditorStore((s) => s.deleteFeature);
+  const features = useEditorStore((s) => s.features);
+  const selectedFeatureId = useEditorStore((s) => s.selectedFeatureId);
 
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
@@ -104,14 +107,6 @@ export function useKeyboardShortcuts() {
         case "A":
           if (mode === "sketch" && !e.ctrlKey && !e.metaKey) {
             setSketchTool("arc");
-            e.preventDefault();
-          }
-          break;
-
-        case "d":
-        case "D":
-          if (mode === "sketch" && !e.ctrlKey && !e.metaKey) {
-            setSketchTool("dimension");
             e.preventDefault();
           }
           break;
@@ -286,7 +281,48 @@ export function useKeyboardShortcuts() {
 
         case "Delete":
         case "Backspace":
-          // Delete is handled by sketch overlay via selected entity IDs
+          if (mode !== "sketch" && !activeOperation && selectedFeatureId) {
+            const featureIdx = features.findIndex((f) => f.id === selectedFeatureId);
+            if (featureIdx >= 0) {
+              if (window.confirm(`Delete "${features[featureIdx].name}"?`)) {
+                deleteFeature(featureIdx);
+              }
+              e.preventDefault();
+            }
+          }
+          // In sketch mode, delete is handled by sketch overlay via selected entity IDs
+          break;
+
+        case "F2":
+          if (mode !== "sketch" && !activeOperation && selectedFeatureId) {
+            // Dispatch a custom event that the feature tree can listen for
+            window.dispatchEvent(new CustomEvent("blockcad:rename-feature", {
+              detail: { featureId: selectedFeatureId },
+            }));
+            e.preventDefault();
+          }
+          break;
+
+        case "d":
+        case "D":
+          if (mode === "sketch" && !e.ctrlKey && !e.metaKey) {
+            setSketchTool("dimension");
+            e.preventDefault();
+          } else if ((e.ctrlKey || e.metaKey) && !e.shiftKey && mode !== "sketch") {
+            // Ctrl+D / Cmd+D: suppress/unsuppress selected feature
+            if (selectedFeatureId) {
+              const featureIdx = features.findIndex((f) => f.id === selectedFeatureId);
+              if (featureIdx >= 0) {
+                const feature = features[featureIdx];
+                if (feature.suppressed) {
+                  useEditorStore.getState().unsuppressFeature(featureIdx);
+                } else {
+                  useEditorStore.getState().suppressFeature(featureIdx);
+                }
+                e.preventDefault();
+              }
+            }
+          }
           break;
       }
     }
@@ -310,5 +346,8 @@ export function useKeyboardShortcuts() {
     startOperation,
     toggleEdges,
     toggleWireframe,
+    deleteFeature,
+    features,
+    selectedFeatureId,
   ]);
 }

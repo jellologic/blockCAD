@@ -271,6 +271,54 @@ export class KernelClient {
     }
   }
 
+  removeFeature(index: number): void {
+    try {
+      this.handle.remove_feature(index);
+    } catch (err) {
+      throw KernelError.fromWasm(String(err));
+    }
+  }
+
+  renameFeature(index: number, name: string): void {
+    try {
+      this.handle.rename_feature(index, name);
+    } catch (err) {
+      throw KernelError.fromWasm(String(err));
+    }
+  }
+
+  moveFeature(from: number, to: number): void {
+    try {
+      this.handle.move_feature(from, to);
+    } catch (err) {
+      throw KernelError.fromWasm(String(err));
+    }
+  }
+
+  updateFeatureParams(index: number, params: FeatureParams): void {
+    try {
+      this.handle.update_feature_params(index, JSON.stringify(params));
+    } catch (err) {
+      throw KernelError.fromWasm(String(err));
+    }
+  }
+
+  rollbackTo(index: number): void {
+    try {
+      this.handle.rollback_to(index);
+    } catch (err) {
+      throw KernelError.fromWasm(String(err));
+    }
+  }
+
+  rollForward(): void {
+    try {
+      this.handle.roll_forward();
+    } catch (err) {
+      throw KernelError.fromWasm(String(err));
+    }
+  }
+
   serialize(): string {
     try {
       return this.handle.serialize();
