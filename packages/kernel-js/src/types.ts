@@ -227,6 +227,170 @@ export interface KernelDocument {
   features: FeatureEntry[];
 }
 
+// --- Batch 2 extended types ---
+
+export interface RadiusPoint {
+  parameter: number;
+  radius: number;
+}
+
+export interface VariableFilletParams {
+  edge_indices: number[];
+  control_points: RadiusPoint[];
+  smooth_transition?: boolean;
+}
+
+export interface FaceFilletParams {
+  face_indices: number[];
+  radius: number;
+}
+
+export type TransformKind = "translate" | "rotate" | "scale";
+
+export interface MoveBodyParams {
+  transform_type: TransformKind;
+  translate_x?: number;
+  translate_y?: number;
+  translate_z?: number;
+  rotate_axis_direction?: Vec3;
+  rotate_angle?: number;
+  rotate_center?: Point3;
+  copy?: boolean;
+}
+
+export interface ScaleBodyParams {
+  uniform?: boolean;
+  scale_factor?: number;
+  scale_x?: number;
+  scale_y?: number;
+  scale_z?: number;
+  center?: Point3;
+  copy?: boolean;
+}
+
+// --- Batch 3 extended types ---
+
+export type HoleType = "simple" | "counterbore" | "countersink";
+
+export interface HoleParams {
+  hole_type: HoleType;
+  diameter: number;
+  depth: number;
+  through_all?: boolean;
+  position?: Point3;
+  direction?: Vec3;
+  cbore_diameter?: number;
+  cbore_depth?: number;
+  csink_diameter?: number;
+  csink_angle?: number;
+}
+
+export interface DomeParams {
+  face_index: number | null;
+  height: number;
+  elliptical?: boolean;
+  direction?: Vec3 | null;
+}
+
+export interface RibParams {
+  thickness: number;
+  direction: Vec3;
+  flip?: boolean;
+  both_sides?: boolean;
+}
+
+export type SplitKeep = "both" | "top" | "bottom";
+
+export interface SplitParams {
+  plane_origin: Point3;
+  plane_normal: Vec3;
+  keep: SplitKeep;
+}
+
+export type CombineOperation = "add" | "subtract" | "intersect";
+
+export interface CombineParams {
+  operation: CombineOperation;
+  body_indices: number[];
+}
+
+export interface CurvePatternParams {
+  curve_entity_ids: string[];
+  count: number;
+  equal_spacing?: boolean;
+}
+
+// --- Reference geometry ---
+
+export type DatumPlaneKind =
+  | { type: "offset"; face_index: number; distance: number }
+  | { type: "through_three_points"; points: [Point3, Point3, Point3] }
+  | { type: "angle"; face_index: number; edge_index: number; angle: number };
+
+export interface DatumPlaneParams {
+  kind: DatumPlaneKind;
+}
+
+export interface ReferenceAxisParams {
+  point1: Point3;
+  point2: Point3;
+}
+
+export interface ReferencePointParams {
+  position: Point3;
+}
+
+export interface CoordinateSystemParams {
+  origin: Point3;
+  x_axis: Vec3;
+  y_axis: Vec3;
+  z_axis: Vec3;
+}
+
+// --- Server-only operation types ---
+
+export interface DraftParams {
+  face_indices: number[];
+  angle: number;
+  pull_direction: Vec3;
+}
+
+export type SweepOrientation = "FollowPath" | "KeepNormal" | "FollowFirstSegment";
+
+export interface SweepParams {
+  guide_curves: unknown[];
+  orientation: SweepOrientation;
+  total_twist?: number;
+}
+
+export interface TangencyCondition {
+  type: "None" | "Direction" | "NormalToProfile";
+  direction?: Vec3;
+}
+
+export interface LoftParams {
+  guide_curves: unknown[];
+  start_tangency?: TangencyCondition;
+  end_tangency?: TangencyCondition;
+}
+
+// --- Export / analysis types ---
+
+export interface StepExportOptions {
+  schema?: string;
+  author?: string;
+  organization?: string;
+}
+
+export interface MassProperties {
+  volume: number;
+  surface_area: number;
+  center_of_mass: Point3;
+  inertia_tensor: number[][];
+  density?: number;
+  mass?: number;
+}
+
 // --- Assembly types ---
 
 export interface ComponentEntry {

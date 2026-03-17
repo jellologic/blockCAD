@@ -84,6 +84,8 @@ enum SolvedEntity {
     Circle { radius: f64 },
     #[serde(rename = "arc")]
     Arc {},
+    #[serde(rename = "ellipse")]
+    Ellipse { radius_x: f64, radius_y: f64, rotation: f64 },
 }
 
 #[wasm_bindgen]
@@ -251,6 +253,13 @@ impl SketchHandle {
                 SketchEntity::Spline { .. } => {
                     // Not yet supported in solver
                 }
+                SketchEntity::Ellipse { radius_x, radius_y, rotation, .. } => {
+                    solved_entities.push(SolvedEntity::Ellipse {
+                        radius_x: *radius_x,
+                        radius_y: *radius_y,
+                        rotation: *rotation,
+                    });
+                }
             }
         }
 
@@ -316,6 +325,13 @@ impl SketchHandle {
                     entities.push(SolvedEntity::Arc {});
                 }
                 SketchEntity::Spline { .. } => {}
+                SketchEntity::Ellipse { radius_x, radius_y, rotation, .. } => {
+                    entities.push(SolvedEntity::Ellipse {
+                        radius_x: *radius_x,
+                        radius_y: *radius_y,
+                        rotation: *rotation,
+                    });
+                }
             }
         }
         serde_json::to_string(&entities)
